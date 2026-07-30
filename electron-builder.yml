@@ -1,0 +1,23 @@
+appId: com.arunverma.llamadesk
+productName: LlamaDesk
+copyright: Copyright © 2026 Arun Verma
+directories:
+  output: dist
+  buildResources: build
+files:
+  - "src/**/*"
+  - "package.json"
+  - "build/icon.png"
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: LlamaDesk
+  artifactName: "LlamaDesk-Setup-${version}.${ext}"

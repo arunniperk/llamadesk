@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+  <title>LlamaDesk</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="titlebar">
+    <div class="titlebar-brand"><span class="logo-dot"></span> LlamaDesk</div>
+  </div>
+
+  <div class="app">
+    <!-- ============ SIDEBAR ============ -->
+    <aside class="sidebar">
+      <div class="side-section">
+        <div class="side-head">
+          <h2>Models</h2>
+          <div class="side-actions">
+            <button id="btn-add-dir" class="icon-btn" title="Add model folder">＋</button>
+            <button id="btn-rescan" class="icon-btn" title="Rescan folders">⟳</button>
+          </div>
+        </div>
+        <div id="suggestions" class="suggestions"></div>
+        <div id="model-list" class="model-list">
+          <div class="empty-hint">No GGUF models found yet.<br/>Add a folder with ＋ above.</div>
+        </div>
+      </div>
+      <div class="side-footer">
+        <div id="llama-version" class="llama-version">llama.cpp: not installed</div>
+        <button id="btn-update-llama" class="btn subtle small">Check for updates</button>
+      </div>
+    </aside>
+
+    <!-- ============ MAIN ============ -->
+    <main class="main">
+      <header class="topbar">
+        <div id="server-pill" class="server-pill off"><span class="dot"></span><span id="server-pill-text">No model loaded</span></div>
+        <div class="mode-switch" id="mode-switch">
+          <button data-mode="chat" class="active">💬 Chat</button>
+          <button data-mode="desktop">🖥️ Desktop Agent</button>
+          <button data-mode="coding">⌨️ Coding Agent</button>
+        </div>
+        <div class="topbar-right">
+          <label class="admin-switch" title="Relaunches the app elevated (UAC prompt)">
+            <span class="admin-label">Admin</span>
+            <input type="checkbox" id="admin-toggle" />
+            <span class="slider"></span>
+          </label>
+          <button id="btn-settings" class="icon-btn big" title="Settings">⚙</button>
+        </div>
+      </header>
+
+      <div class="telemetry" id="telemetry">
+        <div class="stat"><span class="stat-label">CPU</span><span class="stat-val" id="st-cpu">–</span><div class="bar"><i id="bar-cpu"></i></div></div>
+        <div class="stat"><span class="stat-label">RAM</span><span class="stat-val" id="st-ram">–</span><div class="bar"><i id="bar-ram"></i></div></div>
+        <div class="stat"><span class="stat-label">GPU</span><span class="stat-val" id="st-gpu">–</span><div class="bar"><i id="bar-gpu"></i></div></div>
+        <div class="stat"><span class="stat-label">VRAM</span><span class="stat-val" id="st-vram">–</span><div class="bar"><i id="bar-vram"></i></div></div>
+        <div class="stat tokps"><span class="stat-label">TOK/S</span><span class="stat-val big" id="st-tokps">0</span><canvas id="spark" width="120" height="28"></canvas></div>
+      </div>
+
+      <section id="chat" class="chat">
+        <div id="messages" class="messages">
+          <div class="welcome">
+            <div class="welcome-logo">⚡</div>
+            <h1>LlamaDesk</h1>
+            <p>Select a GGUF model on the left, press <b>Load</b>, then chat — or switch to
+              <b>Desktop Agent</b> / <b>Coding Agent</b> to let the model act on this PC with tools,
+              MCP extensions and skills.</p>
+          </div>
+        </div>
+        <div class="composer">
+          <textarea id="input" rows="1" placeholder="Message the model… (Enter to send, Shift+Enter for newline)"></textarea>
+          <button id="btn-send" class="btn primary">Send</button>
+          <button id="btn-stop" class="btn danger hidden">■ Stop</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ============ SETTINGS MODAL ============ -->
+  <div id="modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div class="tabs" id="settings-tabs">
+          <button data-tab="general" class="active">General</button>
+          <button data-tab="llama">llama.cpp</button>
+          <button data-tab="mcp">Extensions (MCP)</button>
+          <button data-tab="skills">Skills</button>
+        </div>
+        <button id="modal-close" class="icon-btn">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="tab-page" id="tab-general">
+          <h3>Model folders</h3>
+          <div id="dir-list" class="dir-list"></div>
+          <button id="btn-add-dir2" class="btn subtle small">＋ Add folder</button>
+          <h3>Server</h3>
+          <div class="form-grid">
+            <label>Context size <input id="set-ctx" type="number" min="512" step="512" /></label>
+            <label>GPU layers (-ngl) <input id="set-ngl" type="number" min="0" /></label>
+            <label>Port <input id="set-port" type="number" min="1024" max="65535" /></label>
+            <label>Temperature <input id="set-temp" type="number" min="0" max="2" step="0.1" /></label>
+            <label>VRAM (GB, for advice) <input id="set-vram" type="number" min="1" /></label>
+            <label>Extra llama-server args <input id="set-extra" type="text" placeholder="--flash-attn on" /></label>
+          </div>
+          <button id="btn-save-general" class="btn primary small">Save</button>
+          <span id="general-saved" class="saved-note"></span>
+        </div>
+
+        <div class="tab-page hidden" id="tab-llama">
+          <h3>llama.cpp runtime</h3>
+          <p class="muted">Prebuilt Windows binaries from <span class="link" data-url="https://github.com/ggml-org/llama.cpp/releases">ggml-org/llama.cpp</span>.
+            For the Radeon RX 9070 XT the <b>Vulkan</b> build is recommended.</p>
+          <div class="form-grid">
+            <label>Backend
+              <select id="set-backend">
+                <option value="vulkan">Vulkan (AMD/NVIDIA/Intel — recommended)</option>
+                <option value="hip">HIP / ROCm (AMD)</option>
+                <option value="cpu">CPU only</option>
+              </select>
+            </label>
+          </div>
+          <div id="update-info" class="update-info">Checking…</div>
+          <div class="row-gap">
+            <button id="btn-check-update" class="btn subtle small">Check for updates</button>
+            <button id="btn-do-update" class="btn primary small hidden">Download &amp; install</button>
+          </div>
+          <div id="update-progress" class="progress hidden"><i></i><span>0%</span></div>
+          <h3>Server log</h3>
+          <pre id="server-log" class="server-log">(server not running)</pre>
+        </div>
+
+        <div class="tab-page hidden" id="tab-mcp">
+          <h3>MCP extensions</h3>
+          <p class="muted">Claude Desktop-style MCP servers give the agent modes extra tools
+            (Filesystem, Desktop Commander, PDF tools…). Enable a server and press <b>Apply</b>.</p>
+          <div class="row-gap">
+            <button id="btn-mcp-import" class="btn subtle small">Import from Claude Desktop</button>
+            <button id="btn-mcp-add" class="btn subtle small">＋ Add server</button>
+            <button id="btn-mcp-apply" class="btn primary small">Apply / reconnect</button>
+          </div>
+          <div id="mcp-list" class="mcp-list"></div>
+        </div>
+
+        <div class="tab-page hidden" id="tab-skills">
+          <h3>Skills</h3>
+          <p class="muted">Skill folders containing a <code>SKILL.md</code> are injected into the
+            agent's system prompt when enabled. Install from a local folder, git URL, or .zip URL.</p>
+          <div class="row-gap">
+            <input id="skill-source" type="text" placeholder="C:\path\to\skill  |  https://github.com/user/skill.git  |  https://…/skill.zip" />
+            <button id="btn-skill-install" class="btn primary small">Install</button>
+            <button id="btn-skill-folder" class="btn subtle small">Pick folder…</button>
+          </div>
+          <div id="skills-list" class="skills-list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="app.js"></script>
+</body>
+</html>

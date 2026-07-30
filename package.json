@@ -1,0 +1,18 @@
+{
+  "name": "llamadesk",
+  "productName": "LlamaDesk",
+  "version": "1.0.0",
+  "description": "Local LLM desktop app powered by llama.cpp — chat, desktop agent and coding agent with GGUF models",
+  "main": "src/main/main.js",
+  "author": "Arun Verma",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "icon": "node scripts/make-icon.js",
+    "dist": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  }
+}
