@@ -14,6 +14,12 @@ const SYSTEM_PROMPTS = {
   coding: `You are LlamaDesk Coding Agent, an expert software engineer working on the user's Windows 11 machine. You can run PowerShell (git, npm, compilers, tests), read/write/edit files and fetch URLs via tools{MCP}. Workflow: understand the code first (read files, list directories), make minimal correct changes, then verify by running builds or tests. Show diffs or key snippets of what you changed. Never fabricate file contents — always read before editing.{ADMIN}`,
 };
 
+// First positive number among the candidates; 0/undefined means "not reported".
+const firstNum = (...vals) => {
+  for (const v of vals) if (typeof v === 'number' && v > 0) return v;
+  return 0;
+};
+
 function buildSystem(mode, settings, online) {
   let base = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.chat;
   if (online) base = base.replace('running fully locally on', 'accessed from LlamaDesk on');
@@ -60,7 +66,10 @@ class Agent {
     const toolDefs = useTools ? [...tools.DEFS, ...mcp.toolDefs().map(({ _server, _tool, ...d }) => d)] : undefined;
 
     const convo = [{ role: 'system', content: buildSystem(mode, settings, online) }, ...messages];
-    let totalTokens = 0;
+    let tokensIn = 0;     // prompt tokens consumed, summed over tool-call round-trips
+    let tokensOut = 0;    // completion tokens generated, ditto
+    let roundChunks = 0;  // chunks of the in-flight round-trip (hoisted for the abort path)
+    let exact = true;     // false once any round-trip falls back to chunk counting
     const t0 = Date.now();
 
     try {
@@ -72,6 +81,9 @@ class Agent {
           temperature: settings.temperature,
         };
         if (toolDefs && toolDefs.length) body.tools = toolDefs;
+        // llama-server reports counts via `timings`; OpenAI-compatible providers only
+        // append a final usage chunk when asked to.
+        if (online) body.stream_options = { include_usage: true };
 
         const res = await fetch(url, {
           method: 'POST',
@@ -91,11 +103,13 @@ class Agent {
         const toolCalls = []; // accumulated by index
         let finishReason = null;
         let timings = null;
+        let usage = null;
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let sseBuf = '';
         let lastTick = Date.now();
         let tickTokens = 0;
+        roundChunks = 0;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -111,6 +125,8 @@ class Agent {
             let obj;
             try { obj = JSON.parse(data); } catch { continue; }
             if (obj.timings) timings = obj.timings;
+            // the usage chunk carries an empty choices array — read it before the guard below
+            if (obj.usage) usage = obj.usage;
             const choice = obj.choices && obj.choices[0];
             if (!choice) continue;
             if (choice.finish_reason) finishReason = choice.finish_reason;
@@ -121,8 +137,8 @@ class Agent {
             }
             if (delta.content) {
               content += delta.content;
-              totalTokens++;
               tickTokens++;
+              roundChunks++;
               emit('delta', { text: delta.content });
             }
             if (delta.tool_calls) {
@@ -137,20 +153,38 @@ class Agent {
             const now = Date.now();
             if (now - lastTick >= 1000) {
               monitor.setTokps(Math.round((tickTokens / ((now - lastTick) / 1000)) * 10) / 10);
+              monitor.setLiveTokens(roundChunks);
               lastTick = now;
               tickTokens = 0;
             }
           }
         }
 
-        if (timings && timings.predicted_per_second) {
-          emit('timings', {
-            tokps: Math.round(timings.predicted_per_second * 10) / 10,
-            promptTokps: Math.round((timings.prompt_per_second || 0) * 10) / 10,
-            tokens: timings.predicted_n || totalTokens,
-          });
-          monitor.setTokps(Math.round(timings.predicted_per_second * 10) / 10);
-        }
+        // ---- token accounting for this round-trip ----
+        // Exact counts come from the provider (`usage`) or llama-server (`timings`);
+        // chunk counting is the last resort. A tool-calling turn makes several
+        // round-trips and re-sends the whole conversation each time, so both totals
+        // are sums over the round-trips, not a single request's numbers.
+        const roundOut = firstNum(usage && usage.completion_tokens, timings && timings.predicted_n, roundChunks);
+        const roundIn = firstNum(usage && usage.prompt_tokens, timings && timings.prompt_n);
+        if (!usage && !(timings && timings.predicted_n)) exact = false;
+        tokensIn += roundIn;
+        tokensOut += roundOut;
+        monitor.commitTokens(roundIn, roundOut);
+        roundChunks = 0; // committed — don't let the abort path count it twice
+
+        const tokps = timings && timings.predicted_per_second
+          ? Math.round(timings.predicted_per_second * 10) / 10
+          : null;
+        emit('timings', {
+          tokps,
+          promptTokps: timings ? Math.round((timings.prompt_per_second || 0) * 10) / 10 : 0,
+          tokens: tokensOut,
+          tokensIn,
+          tokensOut,
+          exact,
+        });
+        if (tokps) monitor.setTokps(tokps);
 
         const cleanCalls = toolCalls.filter(Boolean);
         if (finishReason === 'tool_calls' || (cleanCalls.length && !content)) {
@@ -179,15 +213,24 @@ class Agent {
         emit('done', {
           content,
           seconds: Math.round(((Date.now() - t0) / 1000) * 10) / 10,
-          tokens: totalTokens,
+          tokens: tokensOut,
+          tokensIn,
+          tokensOut,
+          exact,
         });
         monitor.setTokps(0);
         return;
       }
-      emit('done', { content: '(stopped: tool-call loop exceeded 32 iterations)', seconds: 0, tokens: totalTokens });
+      emit('done', {
+        content: '(stopped: tool-call loop exceeded 32 iterations)',
+        seconds: 0, tokens: tokensOut, tokensIn, tokensOut, exact,
+      });
     } catch (err) {
       monitor.setTokps(0);
-      if (signal.aborted) emit('done', { content: null, aborted: true });
+      // the interrupted round-trip never reported usage — keep its chunk count
+      tokensOut += roundChunks;
+      monitor.commitTokens(0, roundChunks);
+      if (signal.aborted) emit('done', { content: null, aborted: true, tokens: tokensOut, tokensIn, tokensOut, exact: false });
       else emit('error', { message: String(err.message || err) });
     } finally {
       this.running = false;

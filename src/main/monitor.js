@@ -27,6 +27,9 @@ class Monitor {
   constructor() {
     this.gpu = { gpu: 0, vramUsed: 0, vramTotal: 0 };
     this.tokps = 0;
+    this.tokensIn = 0;   // prompt tokens consumed, cumulative this session
+    this.tokensOut = 0;  // completion tokens generated, cumulative this session
+    this.liveOut = 0;    // provisional count for the response currently streaming
     this.prevCpu = os.cpus();
     this.child = null;
     this.timer = null;
@@ -71,12 +74,25 @@ class Monitor {
         vramUsed: this.gpu.vramUsed || 0,
         vramTotal: this.gpu.vramTotal || 0,
         tokps: this.tokps,
+        tokensIn: this.tokensIn,
+        tokensOut: this.tokensOut + this.liveOut,
       };
       for (const fn of this.listeners) fn(stats);
     }, 1000);
   }
 
   setTokps(v) { this.tokps = v; }
+
+  // Provisional generated-token count for the in-flight round-trip, so the counter
+  // ticks up while streaming; replaced by the exact number once usage is reported.
+  setLiveTokens(out) { this.liveOut = out; }
+
+  // Fold a finished round-trip's counts into the session totals.
+  commitTokens(inTok, outTok) {
+    this.tokensIn += inTok || 0;
+    this.tokensOut += outTok || 0;
+    this.liveOut = 0;
+  }
 
   onStats(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
 

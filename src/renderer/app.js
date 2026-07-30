@@ -68,6 +68,10 @@ function renderMarkdown(md) {
 
 // ---------------- telemetry ----------------
 const fmtGB = (b) => (b / 1024 ** 3).toFixed(1) + ' GB';
+// used/total sharing one unit — keeps these tiles on a single line now that the
+// telemetry row carries a sixth stat
+const fmtPairGB = (used, total) => (used / 1024 ** 3).toFixed(1) + ' / ' + fmtGB(total);
+const fmtNum = (n) => (n >= 100000 ? Math.round(n / 1000) + 'k' : n.toLocaleString('en-US'));
 function drawSpark() {
   const c = $('spark');
   const ctx = c.getContext('2d');
@@ -89,16 +93,18 @@ function drawSpark() {
 api.monitor.onStats((s) => {
   $('st-cpu').textContent = s.cpu.toFixed(0) + '%';
   $('bar-cpu').style.width = s.cpu + '%';
-  $('st-ram').textContent = fmtGB(s.ramUsed) + ' / ' + fmtGB(s.ramTotal);
+  $('st-ram').textContent = fmtPairGB(s.ramUsed, s.ramTotal);
   $('bar-ram').style.width = (s.ramUsed / s.ramTotal) * 100 + '%';
   $('st-gpu').textContent = s.gpu.toFixed(0) + '%';
   $('bar-gpu').style.width = s.gpu + '%';
   if (s.vramTotal > 0) {
-    $('st-vram').textContent = fmtGB(s.vramUsed) + ' / ' + fmtGB(s.vramTotal);
+    $('st-vram').textContent = fmtPairGB(s.vramUsed, s.vramTotal);
     $('bar-vram').style.width = (s.vramUsed / s.vramTotal) * 100 + '%';
   } else {
     $('st-vram').textContent = fmtGB(s.vramUsed);
   }
+  $('st-tokens-in').textContent = fmtNum(s.tokensIn || 0);
+  $('st-tokens-out').textContent = fmtNum(s.tokensOut || 0);
   $('st-tokps').textContent = s.tokps ? s.tokps.toFixed(1) : '0';
   state.sparkData.push(s.tokps || 0);
   state.sparkData.shift();
@@ -338,20 +344,26 @@ api.chat.onToolEnd(({ id, name, result }) => {
   card.appendChild(res);
   scrollBottom();
 });
-api.chat.onTimings(({ tokps, promptTokps, tokens }) => {
-  if (curAssistant) {
-    curAssistant.lastTimings = `${tokps} tok/s · ${tokens} tokens` + (promptTokps ? ` · prompt ${promptTokps} tok/s` : '');
-  }
+api.chat.onTimings(({ tokps, promptTokps, tokensIn, tokensOut, exact }) => {
+  if (curAssistant) curAssistant.stats = { tokps, promptTokps, tokensIn, tokensOut, exact };
 });
-api.chat.onDone(({ content, seconds, tokens, aborted }) => {
+api.chat.onDone(({ content, seconds, tokens, tokensIn, tokensOut, exact, aborted }) => {
   state.streaming = false;
   $('btn-send').classList.remove('hidden');
   $('btn-stop').classList.add('hidden');
   if (curAssistant) {
     curAssistant.contentEl.innerHTML = renderMarkdown(curAssistant.raw || content || (aborted ? '(stopped)' : ''));
+    // per-response footer: rate, then the two totals for this turn
+    const st = curAssistant.stats || {};
+    const outTok = st.tokensOut || tokensOut || tokens || 0;
+    const inTok = st.tokensIn || tokensIn || 0;
+    const approx = (st.exact ?? exact) ? '' : '~';
+    const rate = st.tokps || (outTok && seconds ? outTok / seconds : 0);
     const bits = [];
-    if (curAssistant.lastTimings) bits.push(curAssistant.lastTimings);
-    else if (tokens && seconds) bits.push(`${(tokens / seconds).toFixed(1)} tok/s · ${tokens} tokens`);
+    if (rate) bits.push(`${rate.toFixed(1)} tok/s`);
+    if (st.promptTokps) bits.push(`prompt ${st.promptTokps} tok/s`);
+    if (outTok) bits.push(`${approx}${fmtNum(outTok)} generated`);
+    if (inTok) bits.push(`${fmtNum(inTok)} consumed`);
     if (seconds) bits.push(seconds + 's');
     curAssistant.meta.textContent = bits.join('  ·  ');
     if (content || curAssistant.raw) {

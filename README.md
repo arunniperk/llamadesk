@@ -15,7 +15,9 @@ Ryzen 7 5800X / 64 GB RAM / Radeon RX 9070 XT (16 GB) machine, but works on any 
   Windows binaries from GitHub (Vulkan build recommended for the RX 9070 XT; HIP/ROCm
   and CPU flavors selectable). Old versions are pruned automatically.
 - **Live telemetry** — CPU, RAM, GPU utilization, VRAM usage and tokens/second with a
-  sparkline, updated every second while generating.
+  sparkline, updated every second while generating. A **TOKENS in/out** tile tracks total
+  tokens consumed (prompt) and generated (completion), cumulative for the session; each
+  reply's own totals appear under it in the message footer.
 - **Three modes**
   - 💬 **Chat** — plain streaming conversation.
   - 🖥️ **Desktop Agent** — the model can run PowerShell, read/write files, list

@@ -66,7 +66,12 @@
         <div class="stat"><span class="stat-label">RAM</span><span class="stat-val" id="st-ram">–</span><div class="bar"><i id="bar-ram"></i></div></div>
         <div class="stat"><span class="stat-label">GPU</span><span class="stat-val" id="st-gpu">–</span><div class="bar"><i id="bar-gpu"></i></div></div>
         <div class="stat"><span class="stat-label">VRAM</span><span class="stat-val" id="st-vram">–</span><div class="bar"><i id="bar-vram"></i></div></div>
-        <div class="stat tokps"><span class="stat-label">TOK/S</span><span class="stat-val big" id="st-tokps">0</span><canvas id="spark" width="120" height="28"></canvas></div>
+        <div class="stat tokens" title="Tokens consumed (prompt) and generated (completion) — cumulative for this session">
+          <span class="stat-label">TOKENS</span>
+          <span class="tok-row"><span class="tok-k">in</span><span class="tok-v" id="st-tokens-in">0</span></span>
+          <span class="tok-row"><span class="tok-k">out</span><span class="tok-v" id="st-tokens-out">0</span></span>
+        </div>
+        <div class="stat tokps"><span class="stat-label">TOK/S</span><span class="stat-val big" id="st-tokps">0</span><canvas id="spark" width="105" height="28"></canvas></div>
       </div>
 
       <section id="chat" class="chat">

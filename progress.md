@@ -1,5 +1,42 @@
 # Progress log
 
+## 2026-07-30 — total token counters
+
+Executed:
+- `agent.js`: real token accounting. Reads `timings.prompt_n`/`predicted_n` (llama-server)
+  and `usage.prompt_tokens`/`completion_tokens` (online, via new
+  `stream_options.include_usage`); `usage` is captured before the empty-`choices` guard.
+  Both totals sum over the round-trips of a tool-calling turn; chunk counting remains a
+  flagged (`exact: false`) fallback. Removed the now-dead `totalTokens` delta counter.
+- `monitor.js`: cumulative session `tokensIn`/`tokensOut` in the stats broadcast, plus a
+  provisional live count so the tile ticks up mid-stream (`setLiveTokens`/`commitTokens`).
+- Renderer: **TOKENS in/out** telemetry tile; per-message footer now reads
+  `41.7 tok/s · 512 generated · 1,340 consumed · 12.3s`.
+- Layout: the 6th tile made RAM/VRAM wrap, so those now share one unit
+  (`18.4 / 63.9 GB`); sparkline 120→105 px and flex ratios retuned — tile/row heights
+  measured back at the pre-change 61 px / 78 px.
+
+Test outcomes:
+- `npx electron scripts/test-tokens.js` (new) — 20/20 PASS against a scripted SSE server:
+  llama-server timings path, provider usage-chunk path, `include_usage` actually sent,
+  no-usage fallback flagged approximate, tool-call round-trip summation, monitor totals
+  incremented once, stats payload shape.
+- Dev smoke test (`LLAMADESK_SMOKE=1 npx electron .`) — renderer loaded, no console errors.
+- Telemetry layout verified by measuring the DOM at 1360 px (default) against the
+  pre-change files from git HEAD.
+- Not tested in-session: live inference against a real GGUF or a real provider key, so the
+  numbers are verified against scripted server responses rather than a live model.
+
+Installer rebuild:
+- `npm run dist` was failing outright on the `winCodeSign` symlink extraction (root cause
+  and the privilege-free fix are in findings.md). Staged the cache manually, after which the
+  build ran clean.
+- `dist\LlamaDesk-Setup-2.0.0.exe` rebuilt — 81,738,799 bytes, NSIS, unsigned. **Version not
+  bumped**, so this installer replaces the earlier 2.0.0 artifact with different contents.
+- Verified the packaged `app.asar` contains the new code (`setLiveTokens`, `commitTokens`,
+  `include_usage`, `st-tokens-out`, `fmtPairGB`) and `dist\win-unpacked\LlamaDesk.exe`
+  passes the smoke test.
+
 ## 2026-07-30 — v2.0.0 (branch `v2`)
 
 Executed:

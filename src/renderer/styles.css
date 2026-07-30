@@ -132,7 +132,13 @@ body {
 .stat-val.big { font-size: 19px; color: var(--accent2); }
 .bar { height: 4px; border-radius: 3px; background: #202636; overflow: hidden; margin-top: 3px; }
 .bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width 0.4s; }
-.stat.tokps { flex: 1.4; flex-direction: row; align-items: center; gap: 12px; }
+/* in/out counters: fixed key column so the two numbers line up, and a tight
+   line-height so this 3-row tile doesn't make the whole telemetry row taller */
+.stat.tokens { flex: 0.65; gap: 0; justify-content: center; }
+.tok-row { display: flex; align-items: baseline; line-height: 1.2; }
+.tok-k { width: 22px; flex: none; font-size: 10px; letter-spacing: 0.08em; color: var(--muted); }
+.tok-v { margin-left: auto; font-size: 12px; font-weight: 600; font-family: var(--mono); }
+.stat.tokps { flex: 1.55; flex-direction: row; align-items: center; gap: 12px; }
 .stat.tokps .stat-label { writing-mode: initial; }
 #spark { margin-left: auto; opacity: 0.9; }
 
