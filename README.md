@@ -39,8 +39,10 @@ Ryzen 7 5800X / 64 GB RAM / Radeon RX 9070 XT (16 GB) machine, but works on any 
   OpenAI-compatible endpoint.
 - **Encrypted API keys** — keys are stored with Windows DPAPI (Electron `safeStorage`)
   in `keys.json`, never in plain settings, and are only sent to their own provider.
-- Online models appear in the sidebar under **Online** (☁); pick one and chat — all
-  three modes work, including tool calling and DeepSeek-reasoner thinking traces.
+- A **🖥 Local / ☁ Online** switch at the top of the sidebar chooses the model source and
+  where chat is sent; each source gets its own pane, and your online pick is remembered
+  when you switch away and back. All three modes work either way, including tool calling
+  and DeepSeek-reasoner thinking traces.
 - Per-provider **Test** (key check) and **Fetch** (live model list) buttons in
   Settings → Providers.
 

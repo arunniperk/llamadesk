@@ -79,17 +79,23 @@ ipcMain.handle('providers:save', (_e, { name, patch }) => {
   settings.save({ providers: next });
   return providers.list(settings.load());
 });
+// Saving a key or fetching a model list means the user intends to use that provider,
+// so enable it — otherwise the models are stored but stay hidden behind `enabled:false`
+// and the sidebar looks like the fetch silently failed.
+function patchProvider(name, patch) {
+  const s = settings.load();
+  const merged = { ...providers.DEFAULT_PROVIDERS, ...(s.providers || {}) };
+  settings.save({ providers: { ...(s.providers || {}), [name]: { ...(merged[name] || {}), ...patch } } });
+}
 ipcMain.handle('providers:setKey', (_e, { name, key }) => {
   providers.setKey(name, key);
+  if (key) patchProvider(name, { enabled: true });
   return providers.list(settings.load());
 });
 ipcMain.handle('providers:test', (_e, name) => providers.test(settings.load(), name));
 ipcMain.handle('providers:fetchModels', async (_e, name) => {
   const models = await providers.fetchModels(settings.load(), name);
-  const s = settings.load();
-  const merged = { ...providers.DEFAULT_PROVIDERS, ...(s.providers || {}) };
-  const next = { ...(s.providers || {}), [name]: { ...(merged[name] || {}), models } };
-  settings.save({ providers: next });
+  patchProvider(name, { models, enabled: true });
   return models;
 });
 ipcMain.handle('chat:stop', () => agent.stop());

@@ -284,7 +284,18 @@ body {
 .skill-row .desc { font-size: 12px; color: var(--muted); }
 
 /* ---------- v2: online providers ---------- */
-.online-head { margin-top: 18px; }
+/* local/online source switch — panes are exclusive, so the switch also decides
+   where chat is sent (see setSource in app.js) */
+.source-switch {
+  display: flex; background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 10px; padding: 3px; gap: 2px; margin-bottom: 12px;
+}
+.source-switch button {
+  flex: 1; border: 0; background: transparent; color: var(--muted); font: inherit;
+  font-size: 12.5px; padding: 6px 10px; border-radius: 8px; cursor: pointer;
+}
+.source-switch button:hover:not(.active) { color: var(--text); }
+.source-switch button.active { background: var(--accent); color: white; }
 .empty-hint.small { padding: 12px 6px; font-size: 12px; }
 .model-card.online .model-name::before { content: "☁ "; color: var(--accent2); }
 .badge.provider { color: var(--accent); border-color: #3d3470; }
@@ -303,9 +314,12 @@ body {
   border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 13px; outline: none;
 }
 .provider-key-row input:focus { border-color: var(--accent); }
-.key-state { font-size: 11.5px; }
+.provider-enable { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.key-state { font-size: 11.5px; white-space: nowrap; }
 .key-state.yes { color: var(--green); }
 .key-state.no { color: var(--muted); }
+/* key saved but the provider is hidden from the sidebar — the state that used to be silent */
+.key-state.warn { color: var(--amber); }
 .provider-models { display: flex; gap: 8px; align-items: center; }
 .provider-models input {
   flex: 1; background: var(--bg2); border: 1px solid var(--border); color: var(--text);

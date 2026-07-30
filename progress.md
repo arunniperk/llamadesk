@@ -1,5 +1,88 @@
 # Progress log
 
+## 2026-07-30 — fix: fetched online models never appeared
+
+Reported against the installed app (`C:\Program Files\LlamaDesk`, the 18:01 build) with a
+DeepSeek key added. Not a fetch bug — root cause was the `enabled` gate; see findings.md.
+
+Diagnosis from the real config (`%APPDATA%\llamadesk`):
+- `keys.json` → `deepseek -> enc`, key saved fine.
+- `settings.json` → `models: ["deepseek-v4-flash","deepseek-v4-pro"]`, so the fetch had
+  worked *and* persisted.
+- `"enabled": false` → sidebar filters `p.enabled && p.hasKey`, so nothing rendered, and the
+  empty hint said "Add API keys", which pointed away from the real problem.
+
+Executed:
+- `main.js`: new `patchProvider()`; `providers:setKey` (non-empty key) and
+  `providers:fetchModels` now set `enabled: true`. An explicit untick still wins.
+- Provider row: checkbox + provider name share a `<label>` (the name is now a click target),
+  and the key state spells out `🔒 key saved · hidden — tick to show` in amber.
+- Online pane hint and the source-switch toast now name the hidden provider instead of
+  telling you to add a key you already added.
+- Repaired the existing config in place: flipped `providers.deepseek.enabled` to `true`
+  (backup at `scratchpad/settings.json.bak`; all 14 top-level settings keys preserved). The
+  code fix only auto-enables on the *next* key save or fetch, so the current state needed it.
+
+Test outcomes:
+- `scripts/test-providers-enable.js` (new) — 11/11 PASS, including a direct repro of the bug
+  (key + models + `enabled:false` → empty sidebar), fetch/setKey enabling, manual disable
+  still winning, and clearing a key not enabling anything.
+- Confirmed against the real config that the Online pane will now render
+  `DeepSeek · deepseek-v4-flash` and `DeepSeek · deepseek-v4-pro`.
+- New provider UI driven in the browser harness with the exact reported state
+  (key saved, models fetched, disabled): hint, toast, amber row state and label wiring all
+  correct.
+- `test-tokens.js` 20/20, `test-providers.js` ALL PASS, renderer smoke test clean.
+Installer:
+- Rebuilt `dist\LlamaDesk-Setup-2.0.0.exe` — 81,739,890 bytes, 18:13, NSIS, unsigned.
+  `winCodeSign` cache still staged, so the build ran straight through.
+- Verified the packaged `app.asar` carries the fix (`patchProvider`, `provider-enable`,
+  `key-state.warn`, the `hidden — tick to show` / `but hidden` strings) plus the switch and
+  token counters from the earlier builds; `dist\win-unpacked\LlamaDesk.exe` smoke test passes.
+- `C:\Program Files\LlamaDesk` still holds the 18:01 build — **run the new installer over it**
+  to pick up the code fix. Not urgent for this machine (the flag was repaired directly), but a
+  fresh install elsewhere would otherwise hit the same trap.
+- **Still version 2.0.0** — fourth distinct artifact under that version. Bump outstanding.
+
+## 2026-07-30 — Local / Online source switch
+
+Executed:
+- Sidebar now leads with a **🖥 Local / ☁ Online** segmented switch; the two model lists
+  became exclusive panes (`#pane-local` / `#pane-online`) instead of being stacked.
+- The switch is also the routing control: `setSource()` clears `state.target` for Local (so
+  chat goes to llama-server) and restores `state.lastOnline` for Online, so an online pick
+  survives switching away and back.
+- Pill reports `No online model selected` when the Online pane has no pick, and
+  `llama.onState` no longer overwrites the pill while Online is active (it keys off
+  `state.source`, not the target).
+- Send guards are per-source now: "Load a local model first, or switch to Online." /
+  "Pick an online model in the sidebar, or switch to Local."
+- Welcome copy + README updated to describe the switch. Source choice is **not persisted**
+  across restarts — same as the existing Chat/Agent mode switch.
+
+Test outcomes:
+- Drove the real renderer in a browser against a stubbed preload bridge
+  (`scratchpad/v6/stub-api.js`, not committed): initial state, Local→Online pane swap,
+  picking a model, Online→Local→Online restoring the remembered pick, and the selected
+  card's `.active` highlight — all correct.
+- Both send guards verified: send blocked, correct toast, no message appended, input text
+  preserved.
+- `LLAMADESK_SMOKE=1 npx electron .` — renderer loaded, no console errors.
+  `scripts/test-tokens.js` — still 20/20.
+- Note: a force-navigate to the same file URL does **not** reset the preview pane's
+  document; an early "fresh load" check was invalid until the harness was copied to a new
+  directory. Copy to a new path per iteration.
+
+Installer:
+- Rebuilt `dist\LlamaDesk-Setup-2.0.0.exe` — 81,739,389 bytes, 18:02, NSIS, unsigned. The
+  staged `winCodeSign` cache from the previous build was still intact, so no workaround was
+  needed this time.
+- Verified the packaged `app.asar` carries the switch (`source-switch`, `setSource`,
+  `lastOnline`, `pane-online`, the new pill/guard strings) alongside the token counters, and
+  `dist\win-unpacked\LlamaDesk.exe` passes the smoke test.
+- **Still 2.0.0** — this is now the third distinct artifact under that version. A bump is
+  outstanding.
+
 ## 2026-07-30 — total token counters
 
 Executed:

@@ -14,7 +14,9 @@ const state = {
   suggestions: {},
   selectedModel: null,
   loadedModel: null,
+  source: 'local', // which sidebar pane is active, and so where chat is sent
   target: null, // null = local llama-server; {kind:'online', provider, model, label}
+  lastOnline: null, // remembered online pick, restored when switching back to Online
   providers: [],
   mode: 'chat',
   history: [], // OpenAI messages of current conversation
@@ -180,12 +182,35 @@ function renderModelList() {
 
 function selectModel(p, andLoad) {
   state.selectedModel = p;
-  state.target = null; // back to local
+  setSource('local');
   renderModelList();
   renderOnlineList();
-  refreshPill();
   if (andLoad) loadModel(p);
 }
+
+// ---------------- local / online source switch ----------------
+// Switching panes also switches where chat goes: Local clears the target so the
+// agent talks to llama-server, Online restores the last model picked there.
+function setSource(src) {
+  state.source = src;
+  state.target = src === 'online' ? state.lastOnline : null;
+  document.querySelectorAll('#source-switch button')
+    .forEach((b) => b.classList.toggle('active', b.dataset.source === src));
+  $('pane-local').classList.toggle('hidden', src !== 'local');
+  $('pane-online').classList.toggle('hidden', src !== 'online');
+  refreshPill();
+}
+$('source-switch').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-source]');
+  if (!btn || btn.dataset.source === state.source) return;
+  setSource(btn.dataset.source);
+  if (state.source === 'online' && !state.target && !state.providers.some((p) => p.enabled && p.hasKey)) {
+    const hidden = state.providers.filter((p) => p.hasKey && !p.enabled);
+    toast(hidden.length
+      ? `${hidden.map((p) => p.label).join(', ')} has a key saved but is hidden — tick it in Settings → Providers.`
+      : 'No online providers configured yet — add an API key in Settings → Providers.');
+  }
+});
 
 // ---------------- online models (v2) ----------------
 async function refreshProviders() {
@@ -198,7 +223,12 @@ function renderOnlineList() {
   const active = state.providers.filter((p) => p.enabled && p.hasKey);
   if (!active.length) {
     const hint = el('div', 'empty-hint small');
-    hint.innerHTML = 'Add API keys in Settings → Providers<br/>(DeepSeek, OpenAI, OpenRouter…)';
+    // a key that's saved but disabled looks identical to "no key" unless we say so
+    const hidden = state.providers.filter((p) => p.hasKey && !p.enabled);
+    hint.innerHTML = hidden.length
+      ? `Key saved for <b>${hidden.map((p) => escapeHtml(p.label)).join('</b>, <b>')}</b>, but hidden.<br/>`
+        + `Tick ${hidden.length > 1 ? 'them' : 'it'} in Settings → Providers.`
+      : 'Add API keys in Settings → Providers<br/>(DeepSeek, OpenAI, OpenRouter…)';
     box.appendChild(hint);
     return;
   }
@@ -213,7 +243,9 @@ function renderOnlineList() {
       badges.appendChild(el('span', 'badge use', 'Tools OK'));
       card.appendChild(badges);
       card.onclick = () => {
-        state.target = { kind: 'online', provider: p.name, model, label: p.label };
+        state.lastOnline = { kind: 'online', provider: p.name, model, label: p.label };
+        state.source = 'online';
+        state.target = state.lastOnline;
         state.selectedModel = null;
         renderModelList();
         renderOnlineList();
@@ -225,8 +257,9 @@ function renderOnlineList() {
   }
 }
 function refreshPill() {
-  if (state.target && state.target.kind === 'online') {
-    setServerPill('on', `☁ ${state.target.label} · ${state.target.model}`);
+  if (state.source === 'online') {
+    if (state.target) setServerPill('on', `☁ ${state.target.label} · ${state.target.model}`);
+    else setServerPill('off', 'No online model selected');
   } else if (state.loadedModel) {
     setServerPill('on', state.loadedModel.split('\\').pop());
   } else {
@@ -257,7 +290,8 @@ function setServerPill(cls, text) {
   $('server-pill-text').textContent = text;
 }
 api.llama.onState((st) => {
-  const onlineSelected = state.target && state.target.kind === 'online';
+  // don't let local server state overwrite the pill while the Online pane is active
+  const onlineSelected = state.source === 'online';
   if (st.running) {
     state.loadedModel = st.model;
     if (!onlineSelected) setServerPill('on', st.model ? st.model.split('\\').pop() + '  ·  port ' + st.port : 'Running');
@@ -387,9 +421,12 @@ async function sendMessage() {
   const input = $('input');
   const text = input.value.trim();
   if (!text || state.streaming) return;
-  const online = state.target && state.target.kind === 'online';
-  if (!online && !state.loadedModel) {
-    toast('Load a local model, or pick an online model in the sidebar.', true);
+  if (state.source === 'online' && !state.target) {
+    toast('Pick an online model in the sidebar, or switch to Local.', true);
+    return;
+  }
+  if (state.source === 'local' && !state.loadedModel) {
+    toast('Load a local model first, or switch to Online.', true);
     return;
   }
   input.value = '';
@@ -588,15 +625,23 @@ async function renderProviders() {
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.checked = p.enabled;
-    cb.title = 'Show this provider in the sidebar';
     cb.onchange = async () => {
       await api.providers.save({ name: p.name, patch: { enabled: cb.checked } });
+      renderProviders();
       refreshProviders();
     };
-    top.appendChild(cb);
-    top.appendChild(el('span', 'name', p.label));
+    // checkbox and provider name share a label, so the name is a click target and the
+    // tick is unmistakably "show this in the sidebar"
+    const enableLabel = document.createElement('label');
+    enableLabel.className = 'provider-enable';
+    enableLabel.title = "Show this provider's models in the sidebar";
+    enableLabel.appendChild(cb);
+    enableLabel.appendChild(el('span', 'name', p.label));
+    top.appendChild(enableLabel);
     top.appendChild(el('span', 'base', p.baseUrl));
-    const keyState = el('span', 'key-state ' + (p.hasKey ? 'yes' : 'no'), p.hasKey ? '🔒 key saved' : 'no key');
+    // spell out the state that used to be silent: key saved but hidden from the sidebar
+    const keyState = el('span', 'key-state ' + (p.hasKey ? (p.enabled ? 'yes' : 'warn') : 'no'),
+      !p.hasKey ? 'no key' : p.enabled ? '🔒 key saved' : '🔒 key saved · hidden — tick to show');
     top.appendChild(keyState);
     if (!p.builtin) {
       const rm = el('button', 'icon-btn', '✕');
@@ -795,6 +840,7 @@ $('btn-skill-folder').onclick = async () => {
 // ---------------- init ----------------
 (async function init() {
   state.settings = await api.settings.get();
+  setSource(state.source); // keep the switch/panes in step with state, not just the markup
   await rescanModels();
   refreshProviders();
   refreshAdmin();

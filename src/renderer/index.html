@@ -15,25 +15,35 @@
     <!-- ============ SIDEBAR ============ -->
     <aside class="sidebar">
       <div class="side-section">
-        <div class="side-head">
-          <h2>Models</h2>
-          <div class="side-actions">
-            <button id="btn-add-dir" class="icon-btn" title="Add model folder">＋</button>
-            <button id="btn-rescan" class="icon-btn" title="Rescan folders">⟳</button>
+        <div class="source-switch" id="source-switch" title="Choose whether to chat with a local GGUF model or an online provider">
+          <button data-source="local" class="active">🖥 Local</button>
+          <button data-source="online">☁ Online</button>
+        </div>
+
+        <div id="pane-local" class="source-pane">
+          <div class="side-head">
+            <h2>Models</h2>
+            <div class="side-actions">
+              <button id="btn-add-dir" class="icon-btn" title="Add model folder">＋</button>
+              <button id="btn-rescan" class="icon-btn" title="Rescan folders">⟳</button>
+            </div>
+          </div>
+          <div id="suggestions" class="suggestions"></div>
+          <div id="model-list" class="model-list">
+            <div class="empty-hint">No GGUF models found yet.<br/>Add a folder with ＋ above.</div>
           </div>
         </div>
-        <div id="suggestions" class="suggestions"></div>
-        <div id="model-list" class="model-list">
-          <div class="empty-hint">No GGUF models found yet.<br/>Add a folder with ＋ above.</div>
-        </div>
-        <div class="side-head online-head">
-          <h2>Online</h2>
-          <div class="side-actions">
-            <button id="btn-providers" class="icon-btn" title="Configure providers &amp; API keys">🔑</button>
+
+        <div id="pane-online" class="source-pane hidden">
+          <div class="side-head">
+            <h2>Online</h2>
+            <div class="side-actions">
+              <button id="btn-providers" class="icon-btn" title="Configure providers &amp; API keys">🔑</button>
+            </div>
           </div>
-        </div>
-        <div id="online-list" class="model-list">
-          <div class="empty-hint small">Add API keys in Settings → Providers<br/>(DeepSeek, OpenAI, OpenRouter…)</div>
+          <div id="online-list" class="model-list">
+            <div class="empty-hint small">Add API keys in Settings → Providers<br/>(DeepSeek, OpenAI, OpenRouter…)</div>
+          </div>
         </div>
       </div>
       <div class="side-footer">
@@ -79,9 +89,10 @@
           <div class="welcome">
             <div class="welcome-logo">⚡</div>
             <h1>LlamaDesk</h1>
-            <p>Select a GGUF model on the left, press <b>Load</b>, then chat — or switch to
-              <b>Desktop Agent</b> / <b>Coding Agent</b> to let the model act on this PC with tools,
-              MCP extensions and skills.</p>
+            <p>Pick <b>🖥 Local</b> for a GGUF model on this PC (select one, press <b>Load</b>) or
+              <b>☁ Online</b> for a provider model — then chat. Switch to <b>Desktop Agent</b> /
+              <b>Coding Agent</b> to let the model act on this PC with tools, MCP extensions
+              and skills.</p>
           </div>
         </div>
         <div class="composer">

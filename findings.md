@@ -29,6 +29,38 @@
 - `.gitignore` must exclude `dist/` and `node_modules/`; `keys.json` lives in
   `%APPDATA%\llamadesk`, outside the repo, so keys can't be committed by accident.
 
+## Provider `enabled` gate (bug, 2026-07-30)
+
+- Symptom: "fetched online models are not showing". The fetch was working perfectly — the
+  models were in `settings.json` and the key was in `keys.json`. The blocker was
+  `enabled: false`: `DEFAULT_PROVIDERS` ships every preset disabled, the sidebar filters on
+  `p.enabled && p.hasKey`, and the only way to flip it was an **unlabeled checkbox** whose
+  meaning lived in a `title` tooltip. Worse, the merge in `providers:fetchModels` carried
+  `enabled: false` forward, so fetching wrote the models *and* re-affirmed the flag hiding
+  them.
+- Fix: saving a key or fetching models now implies intent and sets `enabled: true`
+  (`patchProvider` in main.js). An explicit untick still wins — it's a later, separate write.
+- The deeper lesson: **"stored but invisible" states need to say so.** The sidebar hint, the
+  switch toast, and the provider row now all distinguish "no key" from "key saved but
+  hidden", instead of showing the same "add an API key" message in both cases.
+
+## Testing the renderer
+
+- The renderer can be driven **outside Electron**: stub `window.api` (the preload bridge) in
+  a script tag ahead of `app.js` and the whole UI runs in a plain browser, so sidebar/switch
+  behaviour can be asserted against the DOM instead of eyeballed. A `Proxy` fallback that
+  returns `() => {}` for `on*` and `Promise.resolve({})` for everything else covers the calls
+  a test doesn't care about.
+- Two traps when verifying layout/behaviour this way: `styles.css` is **cached** across
+  reloads, and force-navigating to the **same file URL does not reset the document** (state
+  from the previous run survives and quietly invalidates "fresh load" assertions). Copy the
+  renderer to a new scratchpad directory per iteration.
+- `npx electron scripts/foo.js` runs with app name **"Electron"**, so `app.getPath('userData')`
+  is `%APPDATA%\Electron`, *not* `%APPDATA%\llamadesk`. Good news for tests (they can't harm
+  real settings/keys), but any script meant to inspect the real app's config must call
+  `app.setPath('userData', path.join(process.env.APPDATA, 'llamadesk'))` first — otherwise it
+  silently reports defaults and looks like data loss.
+
 ## Building the installer on this machine
 
 - **`npm run dist` fails at `winCodeSign` extraction** with "Cannot create symbolic link: A
