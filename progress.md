@@ -12,7 +12,15 @@ Executed:
   chat send/pill/labels.
 - Version bumped to 2.0.0; installer rebuilt; pushed to github.com/arunniperk.
 
-Test outcomes: see below per build.
+Test outcomes:
+- `npx electron scripts/test-providers.js` — 15/15 PASS: DPAPI availability, key
+  round-trip, **key absent from keys.json in plaintext**, resolve()/authHeaders wiring,
+  OpenRouter extra headers, custom-provider merge, key removal, error paths.
+- Dev smoke test (`LLAMADESK_SMOKE=1 npx electron .`) — renderer loaded, no console errors.
+- Packaged `dist\win-unpacked\LlamaDesk.exe` smoke test — pass.
+- `LlamaDesk-Setup-2.0.0.exe` built (78 MB, NSIS, unsigned).
+- Not tested in-session: live DeepSeek API round-trip (needs the user's real key entered
+  in Settings → Providers; the Test button performs this check).
 
 ## 2026-07-30 — Initial build (LlamaDesk 1.0.0)
 
