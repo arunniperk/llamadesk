@@ -30,6 +30,18 @@ Ryzen 7 5800X / 64 GB RAM / Radeon RX 9070 XT (16 GB) machine, but works on any 
 - **Skills** — install skill folders (containing `SKILL.md`) from a local path, git URL
   or zip URL; enabled skills are injected into the agent system prompt.
 
+## New in 2.0 — Online models
+
+- **Provider system** — use cloud models alongside local GGUFs: **DeepSeek**
+  (`deepseek-chat`, `deepseek-reasoner`), **OpenAI**, **OpenRouter**, or any custom
+  OpenAI-compatible endpoint.
+- **Encrypted API keys** — keys are stored with Windows DPAPI (Electron `safeStorage`)
+  in `keys.json`, never in plain settings, and are only sent to their own provider.
+- Online models appear in the sidebar under **Online** (☁); pick one and chat — all
+  three modes work, including tool calling and DeepSeek-reasoner thinking traces.
+- Per-provider **Test** (key check) and **Fetch** (live model list) buttons in
+  Settings → Providers.
+
 ## Getting started
 
 1. Install with `dist/LlamaDesk-Setup-1.0.0.exe` (or run from source: `npm install && npm start`).

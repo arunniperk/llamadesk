@@ -6,6 +6,7 @@ const tools = require('./tools');
 const { manager: mcp } = require('./mcp');
 const skills = require('./skills');
 const monitor = require('./monitor');
+const providers = require('./providers');
 
 const SYSTEM_PROMPTS = {
   chat: `You are LlamaDesk, a helpful AI assistant running fully locally on the user's Windows 11 PC (Ryzen 7 5800X, 64 GB RAM, Radeon RX 9070 XT). Be concise, accurate and friendly. Use markdown for formatting and code blocks where useful.`,
@@ -13,8 +14,9 @@ const SYSTEM_PROMPTS = {
   coding: `You are LlamaDesk Coding Agent, an expert software engineer working on the user's Windows 11 machine. You can run PowerShell (git, npm, compilers, tests), read/write/edit files and fetch URLs via tools{MCP}. Workflow: understand the code first (read files, list directories), make minimal correct changes, then verify by running builds or tests. Show diffs or key snippets of what you changed. Never fabricate file contents — always read before editing.{ADMIN}`,
 };
 
-function buildSystem(mode, settings) {
+function buildSystem(mode, settings, online) {
   let base = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.chat;
+  if (online) base = base.replace('running fully locally on', 'accessed from LlamaDesk on');
   const mcpTools = mcp.toolDefs();
   base = base.replace('{MCP}', mcpTools.length
     ? `, plus ${mcpTools.length} MCP extension tools (prefixed mcp__)`
@@ -38,23 +40,33 @@ class Agent {
   }
 
   // emit: (event, payload) => void  — forwards to renderer
-  async run({ messages, mode, settings }, emit) {
+  // target: null/{kind:'local'} for llama-server, or {kind:'online', provider, model}
+  async run({ messages, mode, settings, target }, emit) {
     if (this.running) throw new Error('A response is already in progress.');
     this.running = true;
     this.abort = new AbortController();
     const signal = this.abort.signal;
-    const url = `http://127.0.0.1:${settings.port}/v1/chat/completions`;
+    const online = target && target.kind === 'online';
+    let url = `http://127.0.0.1:${settings.port}/v1/chat/completions`;
+    let headers = { 'Content-Type': 'application/json' };
+    let modelId = 'local';
+    if (online) {
+      const p = providers.resolve(settings, target.provider);
+      url = p.baseUrl + '/chat/completions';
+      headers = { ...headers, ...providers.authHeaders(target.provider, p.key) };
+      modelId = target.model;
+    }
     const useTools = mode !== 'chat';
     const toolDefs = useTools ? [...tools.DEFS, ...mcp.toolDefs().map(({ _server, _tool, ...d }) => d)] : undefined;
 
-    const convo = [{ role: 'system', content: buildSystem(mode, settings) }, ...messages];
+    const convo = [{ role: 'system', content: buildSystem(mode, settings, online) }, ...messages];
     let totalTokens = 0;
     const t0 = Date.now();
 
     try {
       for (let iter = 0; iter < 32; iter++) {
         const body = {
-          model: 'local',
+          model: modelId,
           messages: convo,
           stream: true,
           temperature: settings.temperature,
@@ -63,13 +75,14 @@ class Agent {
 
         const res = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify(body),
           signal,
         });
         if (!res.ok) {
           const errText = await res.text().catch(() => '');
-          throw new Error(`llama-server HTTP ${res.status}: ${errText.slice(0, 400)}`);
+          const who = online ? `${target.provider} API` : 'llama-server';
+          throw new Error(`${who} HTTP ${res.status}: ${errText.slice(0, 400)}`);
         }
 
         // ---- consume SSE stream ----

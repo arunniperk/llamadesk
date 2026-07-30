@@ -48,6 +48,13 @@ contextBridge.exposeInMainWorld('api', {
     status: invoke('admin:status'),
     setMode: invoke('admin:setMode'),
   },
+  providers: {
+    list: invoke('providers:list'),
+    save: invoke('providers:save'),
+    setKey: invoke('providers:setKey'),
+    test: invoke('providers:test'),
+    fetchModels: invoke('providers:fetchModels'),
+  },
   pickFolder: invoke('dialog:pickFolder'),
   openExternal: invoke('shell:openExternal'),
 });

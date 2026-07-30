@@ -26,6 +26,15 @@
         <div id="model-list" class="model-list">
           <div class="empty-hint">No GGUF models found yet.<br/>Add a folder with ＋ above.</div>
         </div>
+        <div class="side-head online-head">
+          <h2>Online</h2>
+          <div class="side-actions">
+            <button id="btn-providers" class="icon-btn" title="Configure providers &amp; API keys">🔑</button>
+          </div>
+        </div>
+        <div id="online-list" class="model-list">
+          <div class="empty-hint small">Add API keys in Settings → Providers<br/>(DeepSeek, OpenAI, OpenRouter…)</div>
+        </div>
       </div>
       <div class="side-footer">
         <div id="llama-version" class="llama-version">llama.cpp: not installed</div>
@@ -86,6 +95,7 @@
         <div class="tabs" id="settings-tabs">
           <button data-tab="general" class="active">General</button>
           <button data-tab="llama">llama.cpp</button>
+          <button data-tab="providers">Providers</button>
           <button data-tab="mcp">Extensions (MCP)</button>
           <button data-tab="skills">Skills</button>
         </div>
@@ -130,6 +140,16 @@
           <div id="update-progress" class="progress hidden"><i></i><span>0%</span></div>
           <h3>Server log</h3>
           <pre id="server-log" class="server-log">(server not running)</pre>
+        </div>
+
+        <div class="tab-page hidden" id="tab-providers">
+          <h3>Online model providers</h3>
+          <p class="muted">Use cloud models (DeepSeek, OpenAI, OpenRouter, or any OpenAI-compatible API)
+            alongside local ones. API keys are stored <b>encrypted</b> on this PC (Windows DPAPI) and
+            sent only to the provider you saved them for. Enabled providers with a key appear in the
+            sidebar under <b>Online</b>.</p>
+          <div id="providers-list" class="providers-list"></div>
+          <button id="btn-provider-add" class="btn subtle small">＋ Add custom provider</button>
         </div>
 
         <div class="tab-page hidden" id="tab-mcp">

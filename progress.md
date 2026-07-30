@@ -1,5 +1,19 @@
 # Progress log
 
+## 2026-07-30 — v2.0.0 (branch `v2`)
+
+Executed:
+- Forked repo: git init, v1.0.0 committed + tagged on `main`, work continues on `v2`.
+- New `src/main/providers.js`: DeepSeek/OpenAI/OpenRouter presets + custom providers,
+  keys encrypted via Electron safeStorage (DPAPI), test + fetch-models endpoints.
+- Agent loop routes to online providers (Authorization header, provider model id);
+  reasoning_content streaming (deepseek-reasoner) already supported from v1.
+- Renderer: "Online" sidebar section (☁ cards), Providers settings tab, target-aware
+  chat send/pill/labels.
+- Version bumped to 2.0.0; installer rebuilt; pushed to github.com/arunniperk.
+
+Test outcomes: see below per build.
+
 ## 2026-07-30 — Initial build (LlamaDesk 1.0.0)
 
 Executed:

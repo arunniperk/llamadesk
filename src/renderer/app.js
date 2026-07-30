@@ -14,6 +14,8 @@ const state = {
   suggestions: {},
   selectedModel: null,
   loadedModel: null,
+  target: null, // null = local llama-server; {kind:'online', provider, model, label}
+  providers: [],
   mode: 'chat',
   history: [], // OpenAI messages of current conversation
   streaming: false,
@@ -172,8 +174,58 @@ function renderModelList() {
 
 function selectModel(p, andLoad) {
   state.selectedModel = p;
+  state.target = null; // back to local
   renderModelList();
+  renderOnlineList();
+  refreshPill();
   if (andLoad) loadModel(p);
+}
+
+// ---------------- online models (v2) ----------------
+async function refreshProviders() {
+  state.providers = await api.providers.list();
+  renderOnlineList();
+}
+function renderOnlineList() {
+  const box = $('online-list');
+  box.innerHTML = '';
+  const active = state.providers.filter((p) => p.enabled && p.hasKey);
+  if (!active.length) {
+    const hint = el('div', 'empty-hint small');
+    hint.innerHTML = 'Add API keys in Settings → Providers<br/>(DeepSeek, OpenAI, OpenRouter…)';
+    box.appendChild(hint);
+    return;
+  }
+  for (const p of active) {
+    for (const model of p.models) {
+      const isSel = state.target && state.target.provider === p.name && state.target.model === model;
+      const card = el('div', 'model-card online' + (isSel ? ' active' : ''));
+      card.appendChild(el('div', 'model-name', model));
+      const badges = el('div', 'badges');
+      badges.appendChild(el('span', 'badge provider', p.label));
+      if (/reasoner|r1|o[134]|thinking/i.test(model)) badges.appendChild(el('span', 'badge use', 'Reasoning'));
+      badges.appendChild(el('span', 'badge use', 'Tools OK'));
+      card.appendChild(badges);
+      card.onclick = () => {
+        state.target = { kind: 'online', provider: p.name, model, label: p.label };
+        state.selectedModel = null;
+        renderModelList();
+        renderOnlineList();
+        refreshPill();
+      };
+      card.title = `${p.label} · ${model}`;
+      box.appendChild(card);
+    }
+  }
+}
+function refreshPill() {
+  if (state.target && state.target.kind === 'online') {
+    setServerPill('on', `☁ ${state.target.label} · ${state.target.model}`);
+  } else if (state.loadedModel) {
+    setServerPill('on', state.loadedModel.split('\\').pop());
+  } else {
+    setServerPill('off', 'No model loaded');
+  }
 }
 
 async function loadModel(p) {
@@ -199,14 +251,15 @@ function setServerPill(cls, text) {
   $('server-pill-text').textContent = text;
 }
 api.llama.onState((st) => {
+  const onlineSelected = state.target && state.target.kind === 'online';
   if (st.running) {
-    setServerPill('on', st.model ? st.model.split('\\').pop() + '  ·  port ' + st.port : 'Running');
     state.loadedModel = st.model;
+    if (!onlineSelected) setServerPill('on', st.model ? st.model.split('\\').pop() + '  ·  port ' + st.port : 'Running');
   } else if (st.starting) {
-    setServerPill('starting', 'Starting llama-server…');
+    if (!onlineSelected) setServerPill('starting', 'Starting llama-server…');
   } else {
-    setServerPill('off', st.error ? 'Server stopped — see log' : 'No model loaded');
     state.loadedModel = null;
+    if (!onlineSelected) setServerPill('off', st.error ? 'Server stopped — see log' : 'No model loaded');
   }
   renderModelList();
   const log = $('server-log');
@@ -230,7 +283,8 @@ function clearWelcome() {
 }
 function startAssistantMsg() {
   const m = el('div', 'msg assistant');
-  const modeName = { chat: 'Assistant', desktop: 'Desktop Agent', coding: 'Coding Agent' }[state.mode];
+  let modeName = { chat: 'Assistant', desktop: 'Desktop Agent', coding: 'Coding Agent' }[state.mode];
+  if (state.target && state.target.kind === 'online') modeName += ' · ' + state.target.model;
   m.appendChild(el('div', 'who', modeName));
   const bubble = el('div', 'bubble');
   const contentEl = el('div');
@@ -321,7 +375,11 @@ async function sendMessage() {
   const input = $('input');
   const text = input.value.trim();
   if (!text || state.streaming) return;
-  if (!state.loadedModel) { toast('Load a model first (select one in the sidebar).', true); return; }
+  const online = state.target && state.target.kind === 'online';
+  if (!online && !state.loadedModel) {
+    toast('Load a local model, or pick an online model in the sidebar.', true);
+    return;
+  }
   input.value = '';
   autoGrow();
   state.history.push({ role: 'user', content: text });
@@ -330,7 +388,7 @@ async function sendMessage() {
   state.streaming = true;
   $('btn-send').classList.add('hidden');
   $('btn-stop').classList.remove('hidden');
-  await api.chat.send({ messages: state.history, mode: state.mode });
+  await api.chat.send({ messages: state.history, mode: state.mode, target: state.target });
 }
 
 $('btn-send').onclick = sendMessage;
@@ -403,6 +461,7 @@ async function openSettings() {
   modal.classList.remove('hidden');
   renderMcp();
   renderSkills();
+  renderProviders();
   refreshLlamaVersion();
 }
 
@@ -504,6 +563,117 @@ api.llama.onUpdateProgress((pct) => {
   p.querySelector('i').style.width = pct + '%';
   p.querySelector('span').textContent = pct + '%';
 });
+
+// ---------------- providers (v2) ----------------
+async function renderProviders() {
+  state.providers = await api.providers.list();
+  const box = $('providers-list');
+  box.innerHTML = '';
+  for (const p of state.providers) {
+    const card = el('div', 'provider-card');
+
+    const top = el('div', 'provider-top');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = p.enabled;
+    cb.title = 'Show this provider in the sidebar';
+    cb.onchange = async () => {
+      await api.providers.save({ name: p.name, patch: { enabled: cb.checked } });
+      refreshProviders();
+    };
+    top.appendChild(cb);
+    top.appendChild(el('span', 'name', p.label));
+    top.appendChild(el('span', 'base', p.baseUrl));
+    const keyState = el('span', 'key-state ' + (p.hasKey ? 'yes' : 'no'), p.hasKey ? '🔒 key saved' : 'no key');
+    top.appendChild(keyState);
+    if (!p.builtin) {
+      const rm = el('button', 'icon-btn', '✕');
+      rm.title = 'Remove custom provider';
+      rm.onclick = async () => {
+        await api.providers.save({ name: p.name, patch: null });
+        await api.providers.setKey({ name: p.name, key: '' });
+        renderProviders(); refreshProviders();
+      };
+      top.appendChild(rm);
+    }
+    card.appendChild(top);
+
+    const keyRow = el('div', 'provider-key-row');
+    const keyInput = document.createElement('input');
+    keyInput.type = 'password';
+    keyInput.placeholder = p.hasKey ? '•••••••• (saved — paste a new key to replace)' : 'Paste API key…';
+    keyRow.appendChild(keyInput);
+    const saveBtn = el('button', 'btn subtle small', 'Save key');
+    saveBtn.onclick = async () => {
+      const v = keyInput.value.trim();
+      if (!v && !p.hasKey) return;
+      await api.providers.setKey({ name: p.name, key: v });
+      keyInput.value = '';
+      toast(v ? p.label + ' key saved (encrypted).' : p.label + ' key removed.');
+      renderProviders(); refreshProviders();
+    };
+    keyRow.appendChild(saveBtn);
+    const testBtn = el('button', 'btn subtle small', 'Test');
+    testBtn.onclick = async () => {
+      testBtn.disabled = true;
+      try {
+        const r = await api.providers.test(p.name);
+        toast(`${p.label}: connection OK (${r.models} models listed).`);
+      } catch (err) {
+        toast(`${p.label}: ` + String(err.message || err).replace(/^Error invoking remote method '[^']+': Error: /, ''), true);
+      } finally { testBtn.disabled = false; }
+    };
+    keyRow.appendChild(testBtn);
+    card.appendChild(keyRow);
+
+    const modelsRow = el('div', 'provider-models');
+    const modelsInput = document.createElement('input');
+    modelsInput.value = p.models.join(', ');
+    modelsInput.title = 'Comma-separated model ids shown in the sidebar';
+    modelsInput.onchange = async () => {
+      const models = modelsInput.value.split(',').map((s) => s.trim()).filter(Boolean);
+      await api.providers.save({ name: p.name, patch: { models } });
+      refreshProviders();
+    };
+    modelsRow.appendChild(modelsInput);
+    const fetchBtn = el('button', 'btn subtle small', 'Fetch');
+    fetchBtn.title = 'Fetch the model list from the provider API';
+    fetchBtn.onclick = async () => {
+      fetchBtn.disabled = true;
+      try {
+        const models = await api.providers.fetchModels(p.name);
+        modelsInput.value = models.join(', ');
+        toast(`${p.label}: ${models.length} models fetched.`);
+        refreshProviders();
+      } catch (err) { toast('Fetch failed: ' + String(err.message || err), true); }
+      finally { fetchBtn.disabled = false; }
+    };
+    modelsRow.appendChild(fetchBtn);
+    card.appendChild(modelsRow);
+
+    box.appendChild(card);
+  }
+}
+$('btn-provider-add').onclick = async () => {
+  const name = prompt('Provider id (short, e.g. groq):');
+  if (!name) return;
+  const baseUrl = prompt('OpenAI-compatible base URL (e.g. https://api.groq.com/openai/v1):');
+  if (!baseUrl) return;
+  const models = prompt('Model ids (comma separated):') || '';
+  await api.providers.save({
+    name: name.toLowerCase().replace(/[^a-z0-9_-]/g, ''),
+    patch: {
+      label: name, baseUrl: baseUrl.trim(),
+      models: models.split(',').map((s) => s.trim()).filter(Boolean),
+      enabled: true,
+    },
+  });
+  renderProviders(); refreshProviders();
+};
+$('btn-providers').onclick = () => {
+  openSettings();
+  document.querySelector('#settings-tabs button[data-tab="providers"]').click();
+};
 
 // ---------------- MCP ----------------
 async function renderMcp() {
@@ -614,6 +784,7 @@ $('btn-skill-folder').onclick = async () => {
 (async function init() {
   state.settings = await api.settings.get();
   await rescanModels();
+  refreshProviders();
   refreshAdmin();
   refreshLlamaVersion();
   const st = await api.llama.status();

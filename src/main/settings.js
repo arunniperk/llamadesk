@@ -17,6 +17,7 @@ const DEFAULTS = {
   autoApproveTools: true,
   temperature: 0.7,
   skillsEnabled: [],
+  providers: {}, // overrides/additions merged over providers.DEFAULT_PROVIDERS; keys live encrypted in keys.json
   mcpServers: {
     filesystem: {
       command: 'npx',

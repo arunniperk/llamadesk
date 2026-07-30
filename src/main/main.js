@@ -9,6 +9,7 @@ const agent = require('./agent');
 const mcp = require('./mcp');
 const skillsMod = require('./skills');
 const elevation = require('./elevation');
+const providers = require('./providers');
 
 let win = null;
 const send = (ch, payload) => { if (win && !win.isDestroyed()) win.webContents.send(ch, payload); };
@@ -60,11 +61,36 @@ ipcMain.handle('llama:update', async () => {
   return r;
 });
 
-ipcMain.handle('chat:send', (_e, { messages, mode }) => {
+ipcMain.handle('chat:send', (_e, { messages, mode, target }) => {
   const s = settings.load();
-  agent.run({ messages, mode, settings: s }, (event, payload) => send('chat:' + event, payload))
+  agent.run({ messages, mode, settings: s, target }, (event, payload) => send('chat:' + event, payload))
     .catch((err) => send('chat:error', { message: String(err.message || err) }));
   return true;
+});
+
+// ---- online providers (v2) ----
+ipcMain.handle('providers:list', () => providers.list(settings.load()));
+ipcMain.handle('providers:save', (_e, { name, patch }) => {
+  const s = settings.load();
+  const merged = { ...providers.DEFAULT_PROVIDERS, ...(s.providers || {}) };
+  const next = { ...(s.providers || {}) };
+  if (patch === null) delete next[name];
+  else next[name] = { ...(merged[name] || {}), ...patch };
+  settings.save({ providers: next });
+  return providers.list(settings.load());
+});
+ipcMain.handle('providers:setKey', (_e, { name, key }) => {
+  providers.setKey(name, key);
+  return providers.list(settings.load());
+});
+ipcMain.handle('providers:test', (_e, name) => providers.test(settings.load(), name));
+ipcMain.handle('providers:fetchModels', async (_e, name) => {
+  const models = await providers.fetchModels(settings.load(), name);
+  const s = settings.load();
+  const merged = { ...providers.DEFAULT_PROVIDERS, ...(s.providers || {}) };
+  const next = { ...(s.providers || {}), [name]: { ...(merged[name] || {}), models } };
+  settings.save({ providers: next });
+  return models;
 });
 ipcMain.handle('chat:stop', () => agent.stop());
 
