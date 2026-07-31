@@ -1,5 +1,39 @@
 # Progress log
 
+## 2026-07-31 — code review fixes (config layer)
+
+Reviewed the published `v2` and verified each suspect path by executing it rather than
+reading it. Two confirmed bugs plus the shared root cause; see findings.md.
+
+Executed:
+- `providers.js`: new `mergeProviders()` merges stored entries over the presets
+  entry-by-entry. `resolve()` uses it and now reports a missing base URL as an actionable
+  error instead of a `TypeError`. Exported for tests.
+- `llama.js`: `extraArgs` tokenising defaults to `[]` (`.match()` yields `null` for a
+  whitespace-only string).
+- `settings.js`: cache keyed on the settings.json mtime, so external edits are picked up
+  without a restart. Documented why `save()` stays shallow.
+- `main.js`: `providers:save` / `patchProvider` write only user deltas — the hand-spreading
+  of `DEFAULT_PROVIDERS` that the old shallow merge forced is gone.
+- `scripts/test-providers-enable.js`: its copy of the handler bodies kept in sync.
+
+Test outcomes:
+- `scripts/test-config-robustness.js` (new) — 19/19 PASS: preset inheritance from a partial
+  entry, stored-value override, actionable missing-baseUrl error, unknown provider, six
+  `extraArgs` tokenising cases incl. quoted paths, and external-edit pickup.
+- Pre-fix behaviour captured before changing anything: `resolve(partial)` threw
+  `TypeError: Cannot read properties of undefined (reading 'replace')` and
+  `splitArgs("   ")` threw `TypeError: ... (reading 'map')`.
+- Regression: `test-providers.js` ALL PASS, `test-providers-enable.js` all checks passed,
+  `test-tokens.js` all checks passed, renderer smoke test clean.
+
+Not fixed (reported, left open): multi-adapter VRAM aggregation in `monitor.js`
+(sums used across adapters, takes max for the total — moot on a single-GPU box), tool calls
+dropped when a model emits content *and* `tool_calls` with `finish_reason:'stop'`, MCP tool
+names truncated at 64 chars not round-tripping, dead `reasoning` accumulator in `agent.js`,
+and the `safeStorage`-unavailable fallback storing base64 while the UI still says
+"encrypted". Version is still 2.0.0 across five distinct artifacts — bump still outstanding.
+
 ## 2026-07-30 — fix: fetched online models never appeared
 
 Reported against the installed app (`C:\Program Files\LlamaDesk`, the 18:01 build) with a

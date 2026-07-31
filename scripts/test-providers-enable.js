@@ -36,10 +36,10 @@ app.whenReady().then(async () => {
   const port = server.address().port;
 
   // the handler bodies from main.js, verbatim in behaviour
+  // (keep in sync with main.js — these are copies, not imports)
   const patchProvider = (name, patch) => {
-    const s = settings.load();
-    const merged = { ...providers.DEFAULT_PROVIDERS, ...(s.providers || {}) };
-    settings.save({ providers: { ...(s.providers || {}), [name]: { ...(merged[name] || {}), ...patch } } });
+    const stored = settings.load().providers || {};
+    settings.save({ providers: { ...stored, [name]: { ...(stored[name] || {}), ...patch } } });
   };
   const setKeyHandler = (name, key) => {
     providers.setKey(name, key);

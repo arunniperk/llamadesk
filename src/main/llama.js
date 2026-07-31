@@ -120,7 +120,10 @@ class LlamaServer {
       '-ngl', String(settings.gpuLayers),
       '--jinja',
     ];
-    if (settings.extraArgs) args.push(...settings.extraArgs.match(/(?:[^\s"]+|"[^"]*")+/g).map((s) => s.replace(/^"|"$/g, '')));
+    // .match() returns null for a string with no tokens (e.g. "   "), so default
+    // to [] — spreading null throws and would surface as an unloadable model.
+    const extra = (settings.extraArgs || '').match(/(?:[^\s"]+|"[^"]*")+/g) || [];
+    args.push(...extra.map((s) => s.replace(/^"|"$/g, '')));
     this.state = { ...this.state, starting: true, running: false, error: null, model: modelPath, port: settings.port, log: [] };
     this.emit();
 

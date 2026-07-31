@@ -62,9 +62,22 @@ function getKey(name) {
 
 function hasKey(name) { return !!readKeys()[name]; }
 
+// Merge stored settings.providers over the presets, ENTRY BY ENTRY.
+// A shallow map-level spread would let a partial stored entry (e.g. `{enabled:true}`)
+// replace a whole preset and silently drop its baseUrl/label/models, so every caller
+// would have to re-spread the defaults by hand to stay safe.
+function mergeProviders(settings) {
+  const stored = settings.providers || {};
+  const out = {};
+  for (const name of new Set([...Object.keys(DEFAULT_PROVIDERS), ...Object.keys(stored)])) {
+    out[name] = { ...(DEFAULT_PROVIDERS[name] || {}), ...(stored[name] || {}) };
+  }
+  return out;
+}
+
 // Merge stored settings.providers over defaults; annotate with key presence.
 function list(settings) {
-  const merged = { ...DEFAULT_PROVIDERS, ...(settings.providers || {}) };
+  const merged = mergeProviders(settings);
   return Object.entries(merged).map(([name, p]) => ({
     name,
     label: p.label || name,
@@ -77,9 +90,11 @@ function list(settings) {
 }
 
 function resolve(settings, name) {
-  const merged = { ...DEFAULT_PROVIDERS, ...(settings.providers || {}) };
-  const p = merged[name];
+  const p = mergeProviders(settings)[name];
   if (!p) throw new Error(`Unknown provider "${name}"`);
+  if (!p.baseUrl) {
+    throw new Error(`Provider "${p.label || name}" has no base URL — set one in Settings → Providers.`);
+  }
   const key = getKey(name);
   if (!key) throw new Error(`No API key saved for ${p.label || name} — add it in Settings → Providers.`);
   return { baseUrl: p.baseUrl.replace(/\/+$/, ''), key, label: p.label || name };
@@ -122,4 +137,4 @@ async function fetchModels(settings, name) {
   return ids;
 }
 
-module.exports = { DEFAULT_PROVIDERS, list, resolve, authHeaders, setKey, getKey, hasKey, test, fetchModels };
+module.exports = { DEFAULT_PROVIDERS, mergeProviders, list, resolve, authHeaders, setKey, getKey, hasKey, test, fetchModels };

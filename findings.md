@@ -1,5 +1,28 @@
 # Findings
 
+## Config-layer robustness (code review, 2026-07-31)
+
+- **Shallow merge at the wrong level.** `providers.js` merged `settings.providers` over
+  `DEFAULT_PROVIDERS` with one map-level spread, so a *partial* stored entry
+  (`{enabled:true}`) replaced an entire preset and silently dropped `baseUrl`, `label` and
+  `models`. `resolve()` then died on `p.baseUrl.replace` with
+  `TypeError: Cannot read properties of undefined`. Every UI writer happened to write
+  complete entries, which is the only reason it never fired — a latent landmine, not an
+  active fault. Fixed with `mergeProviders()`, an entry-by-entry merge; `settings.providers`
+  now stores only user *deltas*, and `patchProvider`/`providers:save` no longer re-spread
+  the defaults by hand.
+- **`String.match()` returns `null`, not `[]`.** `llama.js` spread
+  `extraArgs.match(...)` directly; a whitespace-only `extraArgs` is truthy but tokenises to
+  `null`, so the spread threw and surfaced as "the model won't load". The renderer `.trim()`s
+  that field, so again only reachable via a hand-edited `settings.json`. Fixed with `|| []`.
+- **A cache with no invalidation hides external edits.** `settings.load()` returned its
+  module-level cache forever, so a `settings.json` repaired by hand stayed invisible until
+  restart. Now keyed on the file's mtime. `save()` stays a *shallow* merge deliberately —
+  deep-merging would make it impossible to delete a nested entry (a provider, an MCP server).
+- Lesson worth keeping: **"the UI always writes it correctly" is not a safety property.**
+  Config files are a public API — anything hand-editable will eventually be hand-edited.
+
+
 - **RX 9070 XT (RDNA4) + llama.cpp**: the official prebuilt that works best is the
   **Vulkan** Windows build (`llama-<tag>-bin-win-vulkan-x64.zip`). HIP/ROCm prebuilts
   lag behind for RDNA4; the app defaults to Vulkan with HIP/CPU selectable.

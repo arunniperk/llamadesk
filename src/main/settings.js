@@ -33,25 +33,40 @@ const DEFAULTS = {
 };
 
 let cache = null;
+let cacheMtime = -1;
 
 function file() {
   return path.join(app.getPath('userData'), 'settings.json');
 }
 
+function mtimeOf(f) {
+  try { return fs.statSync(f).mtimeMs; } catch { return 0; }
+}
+
+// The cache is keyed on the file's mtime, so a settings.json edited outside the
+// app (or repaired by hand) is picked up on the next load instead of being
+// masked until restart.
 function load() {
-  if (cache) return cache;
+  const f = file();
+  const mtime = mtimeOf(f);
+  if (cache && mtime === cacheMtime) return cache;
   try {
-    cache = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(file(), 'utf8')) };
+    cache = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(f, 'utf8')) };
   } catch {
     cache = { ...DEFAULTS };
   }
+  cacheMtime = mtime;
   return cache;
 }
 
+// NOTE: this is a shallow merge by design — nested objects (providers,
+// mcpServers) are replaced wholesale so that entries can be *removed*. Callers
+// patching one entry must therefore spread the existing map themselves.
 function save(patch) {
   cache = { ...load(), ...patch };
   fs.mkdirSync(path.dirname(file()), { recursive: true });
   fs.writeFileSync(file(), JSON.stringify(cache, null, 2));
+  cacheMtime = mtimeOf(file());
   return cache;
 }
 

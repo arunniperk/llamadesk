@@ -70,12 +70,14 @@ ipcMain.handle('chat:send', (_e, { messages, mode, target }) => {
 
 // ---- online providers (v2) ----
 ipcMain.handle('providers:list', () => providers.list(settings.load()));
+// settings.providers stores only the user's DELTAS over providers.DEFAULT_PROVIDERS;
+// providers.mergeProviders() supplies preset fields at read time, so these writers
+// no longer have to re-spread the defaults to avoid dropping baseUrl/label/models.
 ipcMain.handle('providers:save', (_e, { name, patch }) => {
   const s = settings.load();
-  const merged = { ...providers.DEFAULT_PROVIDERS, ...(s.providers || {}) };
   const next = { ...(s.providers || {}) };
   if (patch === null) delete next[name];
-  else next[name] = { ...(merged[name] || {}), ...patch };
+  else next[name] = { ...(next[name] || {}), ...patch };
   settings.save({ providers: next });
   return providers.list(settings.load());
 });
@@ -83,9 +85,8 @@ ipcMain.handle('providers:save', (_e, { name, patch }) => {
 // so enable it — otherwise the models are stored but stay hidden behind `enabled:false`
 // and the sidebar looks like the fetch silently failed.
 function patchProvider(name, patch) {
-  const s = settings.load();
-  const merged = { ...providers.DEFAULT_PROVIDERS, ...(s.providers || {}) };
-  settings.save({ providers: { ...(s.providers || {}), [name]: { ...(merged[name] || {}), ...patch } } });
+  const stored = settings.load().providers || {};
+  settings.save({ providers: { ...stored, [name]: { ...(stored[name] || {}), ...patch } } });
 }
 ipcMain.handle('providers:setKey', (_e, { name, key }) => {
   providers.setKey(name, key);
