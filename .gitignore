@@ -2,3 +2,9 @@ node_modules/
 dist/
 .tmp/
 *.log
+# documents dropped in the repo root while testing attachments — these are the user's own
+# files and this repo is public, so never commit them
+*.pdf
+*.docx
+*.xlsx
+*.pptx

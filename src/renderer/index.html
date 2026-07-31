@@ -158,7 +158,12 @@
           <button id="btn-add-dir2" class="btn subtle small">＋ Add folder</button>
           <h3>Server</h3>
           <div class="form-grid">
-            <label>Context size <input id="set-ctx" type="number" min="512" step="512" /></label>
+            <label>Context size
+              <span class="ctx-row">
+                <input id="set-ctx" type="number" min="512" max="10000000" step="512" />
+                <button id="btn-ctx-max" class="btn subtle small" title="Largest context whose KV cache still fits your VRAM budget for the selected model">Max</button>
+              </span>
+            </label>
             <label>GPU layers (-ngl) <input id="set-ngl" type="number" min="0" /></label>
             <label>Port <input id="set-port" type="number" min="1024" max="65535" /></label>
             <label>Temperature <input id="set-temp" type="number" min="0" max="2" step="0.1" /></label>

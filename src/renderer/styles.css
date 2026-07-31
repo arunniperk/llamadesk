@@ -368,6 +368,10 @@ body {
 .empty-hint.small { padding: 12px 6px; font-size: 12px; }
 .model-card.online .model-name::before { content: "☁ "; color: var(--accent2); }
 .badge.provider { color: var(--accent); border-color: #3d3470; }
+/* architecture / capability labels (MoE, Vision, Coder, SWA, context class) */
+.badge.kind { color: var(--accent2); border-color: #1d4753; }
+.ctx-row { display: flex; gap: 6px; align-items: center; }
+.ctx-row input { flex: 1; min-width: 0; }
 
 .providers-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
 .provider-card {

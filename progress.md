@@ -1,5 +1,45 @@
 # Progress log
 
+## 2026-07-31 — v2.1.2: context sizing, model labels, alternation fix
+
+Work developed in parallel on another machine, reconciled onto v2.1.1. Its attachment/PDF
+layer was **dropped in favour of `extract.js`** — that implementation is broader (OOXML, HTML)
+and its decode-quality gate is better validated: printable-ratio scoring, which the parallel
+branch also used, passes CID garbage at 0.78, while the lexical test catches it at 0.28.
+The parts kept are the ones absent from v2.1.1.
+
+Executed:
+- `models.js` — `kvBytesPerToken()` / `maxContextFor()`: context length is bounded by
+  `(VRAM − weights − buffers) / kv_bytes_per_token`, capped at the trained context.
+  Handles `head_count_kv` as a **per-layer array** (Gemma 4) and skips **sliding-window
+  layers**, whose cache is constant rather than proportional to n_ctx.
+- `models.js` — the GGUF parser now consumes big tokenizer arrays instead of bailing, with a
+  2 MB fast path and a 24 MB retry, because Gemma's shape keys sit *after* them. Without this
+  the KV math silently produced `NaN` and reported the trained context as if validated.
+- `models.js` — **model labels**: `MoE 8/128`, `Vision`, `Coder`, `Reasoning`, `Uncensored`,
+  `SWA`, `256k ctx`. Vision is now determined by an actual `mmproj-*.gguf` beside the model
+  (proof) rather than only a filename guess, matching what `ocr.js` pairs.
+- `agent.js` — `normalizeConvo()` merges consecutive same-role messages. A turn that produced
+  no reply leaves an orphaned user message, so the next send stacks two and Gemma templates
+  raise "roles must alternate". Never merges `tool_calls` messages.
+- `agent.js` — the two opaque 400s are translated: template-can't-tool-call, and
+  prompt-exceeds-context (now quoting both numbers and pointing at ⚙ → Max).
+- Renderer — label badges with explanatory tooltips; **Max** button beside Context size;
+  the context input cap raised to 10,000,000.
+
+Test outcomes — 9/10 suites green:
+- `test-context-sizing.js` 14/14, `test-convo-normalize.js` 12/12 (both ported).
+- extract, tasks, config-robustness, providers, providers-enable, tokens, ui all still green.
+- **`test-tts` fails 1 check — "more than one locale is offered → en-US" — and this is
+  pre-existing**: verified by stashing every one of my edits and re-running against pristine
+  v2.1.1 code, where it fails identically. The OneCore voices (Heera/Ravi, en-IN) that v2.1.1
+  documented are not being enumerated on this machine right now. Left open, not investigated.
+- Measured ceilings on this 16 GB card: gemma-4-12B/26B **256k** (trained cap), the 13 GB
+  uncensored gemma-4-26B **94k**, Qwen2.5-VL-7B **125k**, Qwen3.5-9B **76k**, Qwen3-14B **40k**.
+  **10,000,000 tokens is not reachable** — ~191 GB of KV cache at the cheapest measured rate.
+- `dist\LlamaDesk-Setup-2.1.2.exe` — 81,764,623 bytes; `ProductVersion 2.1.2.0`, asar declares
+  2.1.2, all additions packaged and extract/ingest/ocr/tts/tasks intact; smoke test passes.
+
 ## 2026-07-31 — v2.1.1: TTS voice picker (language / type / voice) + demo
 
 Reported: TTS should let you choose voice type, locale and language, with a small demo.

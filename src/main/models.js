@@ -36,7 +36,11 @@ class Reader {
         const t = this.u32();
         const n = this.u64();
         if (n > 4096) { // huge array (tokenizer vocab) — stop parsing here
-          throw new Error('big-array');
+          // Consume without storing rather than aborting: on some architectures (Gemma 4)
+          // the attention shape keys sit *after* the tokenizer arrays, and bailing here
+          // left us unable to size the KV cache.
+          for (let i = 0; i < n; i++) this.value(t);
+          return null;
         }
         const arr = [];
         for (let i = 0; i < n; i++) arr.push(this.value(t));
@@ -50,10 +54,21 @@ class Reader {
   }
 }
 
+// Two-tier read: 2 MB covers most headers. If the shape keys needed to size the KV cache sit
+// past a big tokenizer array (Gemma), retry with a larger window rather than guessing.
 function parseGguf(filePath) {
+  const fast = parseGgufWith(filePath, 2 * 1024 * 1024);
+  if (fast && !fast.blockCount) {
+    const deep = parseGgufWith(filePath, 24 * 1024 * 1024);
+    if (deep && deep.blockCount) return deep;
+  }
+  return fast;
+}
+
+function parseGgufWith(filePath, bufSize) {
   const fd = fs.openSync(filePath, 'r');
   try {
-    const buf = Buffer.alloc(2 * 1024 * 1024);
+    const buf = Buffer.alloc(bufSize);
     const read = fs.readSync(fd, buf, 0, buf.length, 0);
     const r = new Reader(buf.subarray(0, read));
     if (r.u32() !== GGUF_MAGIC) return null;
@@ -66,17 +81,23 @@ function parseGguf(filePath) {
       'general.finetune', 'general.basename', 'general.file_type',
     ]);
     try {
-      for (let i = 0; i < Math.min(kvCount, 128); i++) {
+      for (let i = 0; i < Math.min(kvCount, 512); i++) {
         const key = r.str();
         const type = r.u32();
         const val = r.value(type);
-        if (wanted.has(key) || /\.(context_length|block_count|expert_count)$/.test(key)) {
-          meta[key.replace(/^[^.]+\.(context_length|block_count|expert_count)$/, '$1')] =
-            wanted.has(key) ? val : val;
-          if (wanted.has(key)) meta[key] = val;
-          else if (/context_length$/.test(key)) meta.contextLength = val;
-          else if (/expert_count$/.test(key)) meta.expertCount = val;
-        }
+        if (wanted.has(key)) meta[key] = val;
+        // architecture-prefixed shape keys, needed for the KV-cache size calculation
+        else if (/\.context_length$/.test(key)) meta.contextLength = val;
+        else if (/\.expert_count$/.test(key)) meta.expertCount = val;
+        else if (/\.expert_used_count$/.test(key)) meta.expertUsedCount = val;
+        else if (/\.block_count$/.test(key)) meta.blockCount = val;
+        else if (/\.embedding_length$/.test(key)) meta.embeddingLength = val;
+        else if (/\.attention\.head_count$/.test(key)) meta.headCount = val;
+        else if (/\.attention\.head_count_kv$/.test(key)) meta.headCountKv = val;
+        else if (/\.attention\.key_length$/.test(key)) meta.keyLength = val;
+        // sliding-window layers keep a fixed window, so they don't grow with context
+        else if (/\.attention\.sliding_window$/.test(key)) meta.slidingWindow = val;
+        else if (/\.attention\.sliding_window_pattern$/.test(key)) meta.swaPattern = val;
       }
     } catch { /* stopped at vocab or truncated buffer — fine */ }
     return meta;
@@ -88,6 +109,61 @@ function parseGguf(filePath) {
 }
 
 const QUANT_RE = /(IQ[1-4]_[A-Z_]+|Q[2-8]_K_?[SML]?|Q[2-8]_[01]|BF16|F16|F32|MXFP4)/i;
+
+// Bytes of KV cache per token of context, at f16. This is what actually bounds context
+// length: it scales linearly with n_ctx, so "max context" is a memory question. Returns 0
+// when the header didn't give us enough shape information.
+function kvBytesPerToken(meta) {
+  const layers = meta.blockCount;
+  if (!layers) return 0;
+  // head_count_kv is a scalar on most architectures but a per-layer array on some (Gemma 4);
+  // multiplying an array by block_count yields NaN, which is falsy and silently disables
+  // the whole check — sum it instead.
+  const perLayer = Array.isArray(meta.headCountKv) ? meta.headCountKv : null;
+  const flatHeads = perLayer ? 0 : (meta.headCountKv || meta.headCount);
+  let headDim = meta.keyLength;
+  if (!headDim && meta.embeddingLength && meta.headCount) headDim = meta.embeddingLength / meta.headCount;
+  if (!headDim || (!perLayer && !flatHeads)) return 0;
+  const swa = Array.isArray(meta.swaPattern) ? meta.swaPattern : null;
+  let heads = 0;
+  for (let i = 0; i < layers; i++) {
+    if (swa && swa[i]) continue; // window-bounded: constant, not proportional to n_ctx
+    heads += perLayer ? (Number(perLayer[i]) || 0) : flatHeads;
+  }
+  if (!heads) return 0;
+  return 2 /* K and V */ * heads * headDim * 2 /* f16 */;
+}
+
+// Largest context this model can actually be served at, given its weights and a VRAM
+// budget — capped at the context it was trained for.
+function maxContextFor(model, vramGB) {
+  const trained = model.contextLength || 0;
+  const perToken = model.kvBytesPerToken || 0;
+  if (!perToken) return trained; // unknown shape — trust the trained value only
+  const free = vramGB * 1024 ** 3 - model.sizeBytes - 1.2 * 1024 ** 3 /* compute buffers */;
+  if (free <= 0) return 0;
+  const fits = Math.floor(free / perToken / 256) * 256;
+  return trained ? Math.min(trained, fits) : fits;
+}
+
+// Short badges for the sidebar: what kind of model this is at a glance.
+function labelsFor(m, meta) {
+  const out = [];
+  if (meta.expertCount > 0) {
+    out.push(meta.expertUsedCount
+      ? `MoE ${meta.expertUsedCount}/${meta.expertCount}`
+      : `MoE ${meta.expertCount}`);
+  }
+  if (m.vision) out.push('Vision');
+  const c = m.caps || {};
+  if (c.embedding >= 8) out.push('Embedding');
+  if (c.vision === 0 && c.coding >= 8) out.push('Coder');
+  if (c.reasoning >= 9) out.push('Reasoning');
+  if (c.uncensored >= 8) out.push('Uncensored');
+  if (meta.swaPattern) out.push('SWA');
+  if (m.contextLength >= 128000) out.push(`${Math.round(m.contextLength / 1024)}k ctx`);
+  return out;
+}
 
 function classify(name) {
   const n = name.toLowerCase();
@@ -176,10 +252,18 @@ function advise(model, vramGB, ramGB) {
 
 function scan(dirs, vramGB, ramGB) {
   const found = [];
+  // An mmproj-*.gguf beside a model is the vision projector: proof of vision capability,
+  // where the name-based caps.vision guess is only an inference. Same pairing ocr.js uses.
+  const projectors = new Map(); // dir -> projector path
   const walk = (dir, depth) => {
     if (depth > 4) return;
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.isFile() && /^mmproj.*\.gguf$/i.test(e.name) && !projectors.has(dir)) {
+        projectors.set(dir, path.join(dir, e.name));
+      }
+    }
     for (const e of entries) {
       const p = path.join(dir, e.name);
       if (e.isDirectory()) walk(p, depth + 1);
@@ -200,8 +284,13 @@ function scan(dirs, vramGB, ramGB) {
           sizeBytes: st.size,
           tags: classify(e.name + ' ' + (meta['general.name'] || '')),
         };
+        m.mmproj = projectors.get(dir) || null;
+        m.vision = !!m.mmproj;
         m.advice = advise(m, vramGB, ramGB);
         m.caps = capabilities(m);
+        m.kvBytesPerToken = kvBytesPerToken(meta);
+        m.maxContext = maxContextFor(m, vramGB);
+        m.labels = labelsFor(m, meta);
         found.push(m);
       }
     }
@@ -269,4 +358,4 @@ function pickFor(models, task, limit = 4) {
   };
 }
 
-module.exports = { scan, suggest, capabilities, pickFor, scoreFor };
+module.exports = { scan, suggest, capabilities, pickFor, scoreFor, kvBytesPerToken, maxContextFor, labelsFor };

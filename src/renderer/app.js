@@ -176,6 +176,17 @@ function renderModelList() {
       m.advice.fit === 'gpu' ? '✓ fits VRAM' : m.advice.fit === 'hybrid' ? '◐ GPU+RAM' : '✗ too big');
     fitBadge.title = m.advice.fitNote;
     badges.appendChild(fitBadge);
+    // architecture / capability labels: MoE, Vision, Coder, SWA, context class…
+    for (const lbl of (m.labels || [])) {
+      const b = el('span', 'badge kind', lbl);
+      if (/^MoE/.test(lbl)) b.title = 'Mixture of Experts — only a few experts run per token, so it is far faster than its total size suggests';
+      else if (lbl === 'Vision') b.title = 'Has an mmproj-*.gguf projector beside it, so it can read images';
+      else if (lbl === 'SWA') b.title = 'Sliding-window attention — cheap KV cache, which is how it affords a very long context';
+      else if (/ctx$/.test(lbl)) b.title = m.maxContext
+        ? `Trained context. Largest that fits your VRAM: ${m.maxContext.toLocaleString('en-US')} tokens`
+        : 'Trained context length';
+      badges.appendChild(b);
+    }
     for (const u of m.advice.uses.slice(0, 2)) badges.appendChild(el('span', 'badge use', u));
     card.appendChild(badges);
     if (state.selectedModel === m.path) {
@@ -189,6 +200,21 @@ function renderModelList() {
     list.appendChild(card);
   }
 }
+
+// "Max context" is a memory question, not a preference: the KV cache grows linearly with
+// n_ctx, so the ceiling is set by the model's shape and the VRAM budget.
+$('btn-ctx-max').onclick = () => {
+  const m = state.models.find((x) => x.path === (state.loadedModel || state.selectedModel));
+  if (!m) { toast('Select a model first — the maximum depends on its architecture and size.', true); return; }
+  if (!m.maxContext) {
+    toast(`${m.name}: its weights alone fill the VRAM budget, so context would spill to system RAM.`, true);
+    return;
+  }
+  $('set-ctx').value = m.maxContext;
+  const kb = m.kvBytesPerToken ? ` · KV cache ~${Math.round(m.kvBytesPerToken / 1024)} KB/token` : '';
+  const capped = m.contextLength && m.maxContext >= m.contextLength ? ' (its full trained context)' : '';
+  toast(`${m.name}: ${m.maxContext.toLocaleString('en-US')} tokens${capped}${kb}. Save, then reload the model.`);
+};
 
 function selectModel(p, andLoad) {
   state.selectedModel = p;

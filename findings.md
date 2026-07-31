@@ -1,5 +1,41 @@
 # Findings
 
+## Context length is a memory budget, not a setting (v2.1.2)
+
+- KV cache grows **linearly with n_ctx**, so the ceiling is
+  `(VRAM − weights − buffers) / kv_bytes_per_token`, capped by the trained context.
+  `kv_bytes_per_token = 2 (K+V) × Σ(kv_heads per layer) × head_dim × 2 (f16)`.
+- **`attention.head_count_kv` is a per-layer array on Gemma 4**, not a scalar. Multiplying it
+  by `block_count` gives `NaN` — which is *falsy*, so the guard silently disabled itself and
+  the trained context was reported as though it had been validated. Sum the array instead.
+  A NaN that fails open is worse than a crash: it looks like a working feature.
+- **Sliding-window layers must be excluded.** Gemma 4 marks most layers SWA
+  (`attention.sliding_window = 1024` + a per-layer `sliding_window_pattern`); those hold a
+  fixed window and don't grow with context. Counting them overestimates KV by ~8×, and this
+  is exactly how Gemma affords 256k context: **16–20 KB/token vs 128–160 KB for Llama/Qwen**.
+- Gemma's shape keys sit **after** the tokenizer arrays, so a parser that bails on the first
+  big array never sees them. Consume-and-discard instead, with a 2 MB fast path and a 24 MB
+  retry only when `block_count` is still missing.
+- Measured on a 16 GB card: gemma-4-12B/26B **256k**, 13 GB uncensored gemma-4-26B **94k**,
+  Qwen2.5-VL-7B **125k**, Qwen3.5-9B **76k**, Qwen3-14B **40k**. A model advertising "1M
+  context" (Qwythos-9B) still only fits **76k** here — trained context is a ceiling, not a promise.
+- **10M tokens is not reachable**: ~191 GB of KV cache at the cheapest rate, ~1.3 TB at Llama rates.
+
+## Strict-alternation chat templates (Gemma) reject ordinary histories
+
+- `llama-server` returns `400 … Unable to generate parser for this template … Jinja Exception:
+  Conversation roles must alternate user/assistant`. Reproduced against medgemma:
+  `user,user` → 400; `system,user,user` → 400; a `tool` role anywhere → 400; a long
+  single user message → fine; `user,assistant,user` → fine.
+- Root cause is **two consecutive user messages**, which arise naturally: the renderer pushes
+  the user message immediately but only appends the assistant message when content arrives, so
+  any stopped or failed turn leaves an orphan and the next send stacks a second. Permissive
+  templates tolerate it silently, which is why it surfaces only on Gemma.
+- Fixed by merging consecutive same-role messages before sending (never `tool_calls` ones).
+  Merging beats dropping the orphan: the user's earlier text stays in context.
+- Separately, **Gemma templates cannot tool-call at all** — the `tool` role is rejected
+  outright, so tool-enabled tasks fail the moment a tool runs, whatever the conversation shape.
+
 ## Windows hides half its TTS voices from you (v2.1.1)
 
 - Windows keeps voices in **two separate registries with two separate APIs**, and the one

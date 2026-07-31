@@ -45,6 +45,28 @@ function resolveProfile(mode) {
   return tasks.get(mode);
 }
 
+// Gemma-family templates enforce strict user/assistant alternation and raise
+// "Conversation roles must alternate user/assistant" otherwise. Two user messages in a row
+// happen naturally whenever a turn produced no reply (stopped, or errored), so merge
+// consecutive same-role messages rather than letting the template blow up. Content may be a
+// plain string or an array of OpenAI content parts (when images are attached).
+function mergeContent(a, b) {
+  if (typeof a === 'string' && typeof b === 'string') return `${a}\n\n${b}`;
+  const parts = (c) => (Array.isArray(c) ? c : [{ type: 'text', text: String(c ?? '') }]);
+  return [...parts(a), ...parts(b)];
+}
+function normalizeConvo(messages) {
+  const out = [];
+  for (const m of messages) {
+    const prev = out[out.length - 1];
+    const mergeable = prev && prev.role === m.role && (m.role === 'user' || m.role === 'assistant')
+      && !prev.tool_calls && !m.tool_calls;
+    if (mergeable) out[out.length - 1] = { ...prev, content: mergeContent(prev.content, m.content) };
+    else out.push(m);
+  }
+  return out;
+}
+
 function buildSystem(profile, settings, online) {
   let base = profile.prompt || SYSTEM_PROMPTS.chat;
   if (online) base = base.replace('running fully locally on', 'accessed from LlamaDesk on');
@@ -107,7 +129,7 @@ class Agent {
         }
       }
     }
-    const convo = [{ role: 'system', content: buildSystem(profile, settings, online) }, ...history];
+    const convo = normalizeConvo([{ role: 'system', content: buildSystem(profile, settings, online) }, ...history]);
     let tokensIn = 0;     // prompt tokens consumed, summed over tool-call round-trips
     let tokensOut = 0;    // completion tokens generated, ditto
     let roundChunks = 0;  // chunks of the in-flight round-trip (hoisted for the abort path)
@@ -136,6 +158,22 @@ class Agent {
         if (!res.ok) {
           const errText = await res.text().catch(() => '');
           const who = online ? `${target.provider} API` : 'llama-server';
+          // Gemma-style templates reject tool and tool_call messages outright, so a task
+          // with tools dies mid-loop on an opaque Jinja error. Say what it actually means.
+          if (/roles must alternate|Unable to generate parser/i.test(errText) && toolDefs && toolDefs.length) {
+            throw new Error(
+              "This model's chat template doesn't support tool calling — Gemma-family templates "
+              + 'reject the tool messages that tool-enabled tasks produce. Use a task without tools, '
+              + 'or load a model with a tool-capable template (Qwen, Llama 3.x).');
+          }
+          // The other common 400: the prompt simply doesn't fit.
+          if (/exceed_context_size|exceeds the available context/i.test(errText)) {
+            const m = errText.match(/"n_prompt_tokens":(\d+).*?"n_ctx":(\d+)/);
+            throw new Error(m
+              ? `Prompt is ${Number(m[1]).toLocaleString('en-US')} tokens but the context is ${Number(m[2]).toLocaleString('en-US')}. `
+                + 'Raise Context size in Settings (⚙ → Max) and reload the model, or attach less.'
+              : `${who} HTTP ${res.status}: ${errText.slice(0, 400)}`);
+          }
           throw new Error(`${who} HTTP ${res.status}: ${errText.slice(0, 400)}`);
         }
 
