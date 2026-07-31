@@ -1,5 +1,40 @@
 # Findings
 
+## PDF text extraction (v2.1)
+
+- **"Looks like text" is not "is the right text."** The first decode-quality gate scored
+  printable-character ratio. Validated against five real PDFs, one (`research_paper.pdf`)
+  scored **0.78 — a pass — while sharing 0.0% of its words with `pdftotext`'s output.**
+  PDFs with CID/custom font encodings decode to letters, just the *wrong* letters, so a
+  character-class test cannot see the failure. Feeding that to a model is worse than
+  extracting nothing: it answers confidently from noise.
+- The separating signal is **lexical, not typographic**. Measured across the same PDFs:
+
+  | | stop-word % | words with a vowel % |
+  |---|---|---|
+  | correct decode | 25–31 | 84–92 |
+  | CID garbage | **0.02** | **40** |
+
+  `textQuality` now scores `0.7 × vowelRatio + 0.3 × min(1, stopRatio/0.15)`. Vowel rate
+  leads deliberately so correctly-decoded **non-English** text is not condemned as garbage
+  (English stop words legitimately vanish there); stop words only add confidence.
+  Real PDFs now score 0.89–0.94, the garbage one 0.28, scanned ones 0.00 — all three routed
+  correctly, the last two to OCR.
+- Recall against `pdftotext` on the PDFs that decode cleanly: **98.4%** and **99.2%**.
+- `pdftotext` exists on this machine only because Git for Windows ships it. Deliberately
+  **not** used at runtime — the extractor is pure Node + zlib so the app stays portable.
+
+## Testing the renderer, properly
+
+- The stubbed-browser harness has a hard limit: the Browser pane renders files outside the
+  project folder as **static snapshots**, so no JavaScript executes and every DOM assertion
+  is vacuous. Use it for layout only.
+- `scripts/test-ui.js` instead `require`s the real `main.js`, grabs the created
+  `BrowserWindow`, and drives the renderer through `webContents.executeJavaScript`. That
+  exercises real IPC, real settings and the real main process — the TTS voice list in the
+  test comes back from actual Windows SAPI. A load-only smoke test proves nothing beyond
+  "no syntax errors".
+
 ## Config-layer robustness (code review, 2026-07-31)
 
 - **Shallow merge at the wrong level.** `providers.js` merged `settings.providers` over

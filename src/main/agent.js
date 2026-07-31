@@ -7,6 +7,19 @@ const { manager: mcp } = require('./mcp');
 const skills = require('./skills');
 const monitor = require('./monitor');
 const providers = require('./providers');
+const tasks = require('./tasks');
+const ingest = require('./ingest');
+
+// Tool policy per task: 'full' = everything, 'readonly' = no shell/no writes, 'none'.
+const READONLY_TOOLS = new Set(['read_file', 'list_directory', 'fetch_url']);
+function toolsForPolicy(policy) {
+  if (policy === 'none') return [];
+  const builtin = policy === 'readonly'
+    ? tools.DEFS.filter((d) => READONLY_TOOLS.has(d.function.name))
+    : tools.DEFS;
+  const mcpDefs = mcp.toolDefs().map(({ _server, _tool, ...d }) => d);
+  return [...builtin, ...mcpDefs];
+}
 
 const SYSTEM_PROMPTS = {
   chat: `You are LlamaDesk, a helpful AI assistant running fully locally on the user's Windows 11 PC (Ryzen 7 5800X, 64 GB RAM, Radeon RX 9070 XT). Be concise, accurate and friendly. Use markdown for formatting and code blocks where useful.`,
@@ -20,18 +33,34 @@ const firstNum = (...vals) => {
   return 0;
 };
 
-function buildSystem(mode, settings, online) {
-  let base = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.chat;
+// mode may be a legacy id (chat/desktop/coding) or a v2.1 task id (code/extract/…).
+function resolveProfile(mode) {
+  const legacy = { chat: null, desktop: 'terminal', coding: 'code' };
+  if (mode in legacy) {
+    if (legacy[mode] === null) {
+      return { id: 'chat', kind: 'chat', tools: 'none', prompt: SYSTEM_PROMPTS.chat, temperature: null };
+    }
+    return tasks.get(legacy[mode]);
+  }
+  return tasks.get(mode);
+}
+
+function buildSystem(profile, settings, online) {
+  let base = profile.prompt || SYSTEM_PROMPTS.chat;
   if (online) base = base.replace('running fully locally on', 'accessed from LlamaDesk on');
-  const mcpTools = mcp.toolDefs();
-  base = base.replace('{MCP}', mcpTools.length
-    ? `, plus ${mcpTools.length} MCP extension tools (prefixed mcp__)`
-    : '');
-  base = base.replace('{ADMIN}', settings.adminMode
-    ? ' The app is running elevated (Administrator) — system-level changes are permitted, but double-check destructive commands before running them.'
-    : ' The app is NOT elevated; commands needing admin rights will fail (the user can enable Admin Mode in the top bar).');
+
+  if (profile.tools && profile.tools !== 'none') {
+    const mcpCount = mcp.toolDefs().length;
+    const shell = profile.tools === 'full'
+      ? 'You can run PowerShell, read/write/edit files, list directories and fetch URLs via tools'
+      : 'You can read files, list directories and fetch URLs via tools (no shell, no writes)';
+    base += `\n\n${shell}${mcpCount ? `, plus ${mcpCount} MCP extension tools (prefixed mcp__)` : ''}.`;
+    base += settings.adminMode
+      ? ' The app is running elevated (Administrator) — system-level changes are permitted, but double-check destructive commands before running them.'
+      : ' The app is NOT elevated; commands needing admin rights will fail (the user can enable Admin Mode in the top bar).';
+  }
   base += `\nCurrent date: ${new Date().toDateString()}. User home: ${os.homedir()}.`;
-  if (mode !== 'chat') base += skills.buildPrompt(settings.skillsEnabled);
+  if (profile.tools && profile.tools !== 'none') base += skills.buildPrompt(settings.skillsEnabled);
   return base;
 }
 
@@ -47,12 +76,13 @@ class Agent {
 
   // emit: (event, payload) => void  — forwards to renderer
   // target: null/{kind:'local'} for llama-server, or {kind:'online', provider, model}
-  async run({ messages, mode, settings, target }, emit) {
+  async run({ messages, mode, settings, target, attachments }, emit) {
     if (this.running) throw new Error('A response is already in progress.');
     this.running = true;
     this.abort = new AbortController();
     const signal = this.abort.signal;
     const online = target && target.kind === 'online';
+    const profile = resolveProfile(mode);
     let url = `http://127.0.0.1:${settings.port}/v1/chat/completions`;
     let headers = { 'Content-Type': 'application/json' };
     let modelId = 'local';
@@ -62,10 +92,22 @@ class Agent {
       headers = { ...headers, ...providers.authHeaders(target.provider, p.key) };
       modelId = target.model;
     }
-    const useTools = mode !== 'chat';
-    const toolDefs = useTools ? [...tools.DEFS, ...mcp.toolDefs().map(({ _server, _tool, ...d }) => d)] : undefined;
+    const toolDefs = toolsForPolicy(profile.tools);
+    const temperature = typeof profile.temperature === 'number' ? profile.temperature : settings.temperature;
 
-    const convo = [{ role: 'system', content: buildSystem(mode, settings, online) }, ...messages];
+    // Attachment text rides with the newest user turn, so the conversation stays
+    // a valid alternating history and re-sends cleanly on tool-call round-trips.
+    const history = messages.map((m) => ({ ...m }));
+    const block = ingest.toPromptBlock(attachments || []);
+    if (block) {
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i].role === 'user') {
+          history[i].content = `${block}\n\n---\n\n${history[i].content}`;
+          break;
+        }
+      }
+    }
+    const convo = [{ role: 'system', content: buildSystem(profile, settings, online) }, ...history];
     let tokensIn = 0;     // prompt tokens consumed, summed over tool-call round-trips
     let tokensOut = 0;    // completion tokens generated, ditto
     let roundChunks = 0;  // chunks of the in-flight round-trip (hoisted for the abort path)
@@ -78,7 +120,7 @@ class Agent {
           model: modelId,
           messages: convo,
           stream: true,
-          temperature: settings.temperature,
+          temperature,
         };
         if (toolDefs && toolDefs.length) body.tools = toolDefs;
         // llama-server reports counts via `timings`; OpenAI-compatible providers only

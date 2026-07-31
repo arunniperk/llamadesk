@@ -56,11 +56,7 @@
     <main class="main">
       <header class="topbar">
         <div id="server-pill" class="server-pill off"><span class="dot"></span><span id="server-pill-text">No model loaded</span></div>
-        <div class="mode-switch" id="mode-switch">
-          <button data-mode="chat" class="active">💬 Chat</button>
-          <button data-mode="desktop">🖥️ Desktop Agent</button>
-          <button data-mode="coding">⌨️ Coding Agent</button>
-        </div>
+        <div id="task-title" class="task-title"></div>
         <div class="topbar-right">
           <label class="admin-switch" title="Relaunches the app elevated (UAC prompt)">
             <span class="admin-label">Admin</span>
@@ -70,6 +66,8 @@
           <button id="btn-settings" class="icon-btn big" title="Settings">⚙</button>
         </div>
       </header>
+
+      <nav class="task-tabs" id="task-tabs" aria-label="Workspace"></nav>
 
       <div class="telemetry" id="telemetry">
         <div class="stat"><span class="stat-label">CPU</span><span class="stat-val" id="st-cpu">–</span><div class="bar"><i id="bar-cpu"></i></div></div>
@@ -95,10 +93,44 @@
               and skills.</p>
           </div>
         </div>
+        <div id="drop-hint" class="drop-hint hidden">Drop files to attach</div>
+
+        <div id="attach-tray" class="attach-tray hidden"></div>
+
         <div class="composer">
+          <div class="composer-tools">
+            <button id="btn-attach" class="icon-btn" title="Attach files (PDF, images, Office, text)">📎</button>
+            <button id="btn-attach-url" class="icon-btn" title="Add a web page or PDF by URL">🔗</button>
+          </div>
           <textarea id="input" rows="1" placeholder="Message the model… (Enter to send, Shift+Enter for newline)"></textarea>
           <button id="btn-send" class="btn primary">Send</button>
           <button id="btn-stop" class="btn danger hidden">■ Stop</button>
+        </div>
+
+        <!-- Text to Speech controls (shown for the TTS task) -->
+        <div id="tts-bar" class="task-bar hidden">
+          <label>Voice
+            <select id="tts-voice"></select>
+          </label>
+          <label>Rate <input id="tts-rate" type="range" min="-10" max="10" step="1" value="0" /><span id="tts-rate-val">0</span></label>
+          <button id="btn-tts-speak" class="btn primary small">▶ Speak</button>
+          <button id="btn-tts-stop" class="btn danger small hidden">■ Stop</button>
+          <button id="btn-tts-save" class="btn subtle small">💾 Save WAV</button>
+        </div>
+
+        <!-- OCR controls (shown for the OCR task) -->
+        <div id="ocr-bar" class="task-bar hidden">
+          <label>Mode
+            <select id="ocr-mode">
+              <option value="document">Document parsing</option>
+              <option value="free">Free OCR (plain text)</option>
+              <option value="multipage">Multi-page</option>
+              <option value="describe">Describe image</option>
+            </select>
+          </label>
+          <span id="ocr-model-name" class="ocr-model">no vision model selected</span>
+          <button id="btn-ocr-run" class="btn primary small">🔍 Run OCR</button>
+          <button id="btn-ocr-settings" class="btn subtle small">Configure…</button>
         </div>
       </section>
     </main>
@@ -114,6 +146,7 @@
           <button data-tab="providers">Providers</button>
           <button data-tab="mcp">Extensions (MCP)</button>
           <button data-tab="skills">Skills</button>
+          <button data-tab="voice">OCR &amp; Voice</button>
         </div>
         <button id="modal-close" class="icon-btn">✕</button>
       </div>
@@ -190,6 +223,46 @@
             <button id="btn-skill-folder" class="btn subtle small">Pick folder…</button>
           </div>
           <div id="skills-list" class="skills-list"></div>
+        </div>
+
+        <div class="tab-page hidden" id="tab-voice">
+          <h3>Model selection</h3>
+          <label class="check-row">
+            <input type="checkbox" id="set-autopick" />
+            <span>Auto-pick the best local model for the chosen task (ranked by capability, VRAM fit and context length)</span>
+          </label>
+
+          <h3>OCR / vision model</h3>
+          <p class="muted">Needs a vision GGUF plus its <code>mmproj-*.gguf</code> projector in the same
+            folder, and llama.cpp <b>b10199 or newer</b> (older builds reject <code>deepseek2-ocr</code>).</p>
+          <div class="form-grid">
+            <label>Vision model
+              <select id="set-ocr-model"><option value="">— none found —</option></select>
+            </label>
+            <label>Default mode
+              <select id="set-ocr-mode">
+                <option value="document">Document parsing</option>
+                <option value="free">Free OCR (plain text)</option>
+                <option value="multipage">Multi-page</option>
+                <option value="describe">Describe image</option>
+              </select>
+            </label>
+          </div>
+          <label class="check-row">
+            <input type="checkbox" id="set-ocr-cpu" />
+            <span>Run the vision encoder on CPU (<code>--no-mmproj-offload</code>) — faster on weak or
+              integrated GPUs where Vulkan lacks some CLIP ops; benchmark both ways on a discrete card</span>
+          </label>
+          <div id="ocr-pair-info" class="muted"></div>
+
+          <h3>Text to speech</h3>
+          <p class="muted">Uses the offline Windows voices (SAPI) — no model download, no network.</p>
+          <div class="form-grid">
+            <label>Voice <select id="set-tts-voice"></select></label>
+            <label>Rate (−10 … 10) <input id="set-tts-rate" type="number" min="-10" max="10" step="1" /></label>
+          </div>
+          <button id="btn-voice-save" class="btn primary small">Save</button>
+          <span id="voice-saved" class="saved-note"></span>
         </div>
       </div>
     </div>

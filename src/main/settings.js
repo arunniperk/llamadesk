@@ -17,6 +17,15 @@ const DEFAULTS = {
   autoApproveTools: true,
   temperature: 0.7,
   skillsEnabled: [],
+  // --- v2.1 workspace ---
+  activeTask: 'code',      // tabbed workspace selection
+  autoPickModel: true,     // let the app choose the best local model per task
+  ocrModel: '',            // vision GGUF for the OCR task
+  ocrMmproj: '',           // its mmproj-*.gguf projector
+  ocrCpuVision: false,     // --no-mmproj-offload (faster on weak/iGPU setups)
+  ocrMode: 'document',
+  ttsVoice: '',            // empty = system default
+  ttsRate: 0,              // SAPI -10..10
   providers: {}, // overrides/additions merged over providers.DEFAULT_PROVIDERS; keys live encrypted in keys.json
   mcpServers: {
     filesystem: {

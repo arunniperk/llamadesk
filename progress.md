@@ -1,5 +1,48 @@
 # Progress log
 
+## 2026-07-31 — v2.1.0: tabbed workspace, attachments, auto model pick, TTS, OCR
+
+Executed:
+- `tasks.js` (new): 8 task profiles — code, extract, docs, terminal, prompt, tutor, tts, ocr.
+  Each carries its own system prompt, tool policy (`full`/`readonly`/`none`), temperature,
+  minimum context and capability weights. Prompts stay in the main process; only
+  id/label/icon/blurb/kind reach the renderer.
+- `models.js`: `capabilities()` infers a 0-10 profile per model (coding, tools, reasoning,
+  creative, longctx, vision, uncensored, embedding) from name, architecture, measured
+  context length and parameter size; `pickFor()` ranks against a task's weights plus VRAM
+  fit and context. Embedding models can never win a chat task; OCR rejects non-vision models.
+- `extract.js` (new): dependency-free PDF (zlib + content-stream text ops), OOXML
+  (docx/xlsx/pptx via a minimal ZIP central-directory reader) and HTML extraction.
+- `ingest.js` (new): file/URL → text dispatch, image + scanned-PDF detection, 300k-char cap,
+  binary guard, and the `<attachment>` prompt block.
+- `ocr.js` (new): `llama-mtmd-cli` wrapper, auto-pairs a vision GGUF with its
+  `mmproj-*.gguf`, strips `<|det|>` layout markup, optional CPU vision encoder.
+- `tts.js` (new): Windows SAPI via PowerShell. Text goes through a temp **file**, never the
+  command line — arbitrary length and no interpolation into a shell string.
+- `agent.js`: task profiles replace the 3 modes (legacy ids still map), per-task tool
+  filtering and temperature, attachments folded into the newest user turn so the history
+  stays valid across tool-call round-trips.
+- Renderer: task tab strip, attachment tray with drag-and-drop and per-chip OCR, TTS and OCR
+  control bars, ★ auto-pick badge, new "OCR & Voice" settings tab.
+- Version bumped to **2.1.0** — clearing the 2.0.0-across-five-artifacts problem.
+
+Test outcomes — 7/7 suites green:
+- `test-extract.js` (new) 35/35 — real PDF/DOCX/PPTX/HTML fixtures built in-test, scanned and
+  garbled PDF routing, binary and legacy-.doc guards, prompt-block assembly.
+- `test-tasks.js` (new) 30/30 — profile shape, capability inference, per-task ranking, plus a
+  printed ranking over the **real** 5-model library (Coder→code, gpt-oss→docs, OCR→ocr).
+- `test-ui.js` (new) 27/27 — boots the real app and drives the real DOM: tab strip, control
+  swapping per task kind, attachment chips, OCR button, settings tab, zero console errors.
+- Regression: `test-providers`, `test-providers-enable`, `test-tokens`,
+  `test-config-robustness` all still green.
+- Validated the PDF extractor against 5 real-world PDFs with `pdftotext` as reference —
+  98.4% and 99.2% word recall on the two that decode cleanly; see findings.md for the
+  garbage-detection story.
+
+Not covered: live inference through a task profile (needs a loaded GGUF), and OCR through the
+new UI path against a real image (the underlying `ocr.js` command line is the one verified
+working earlier against `Unlimited-OCR`).
+
 ## 2026-07-31 — code review fixes (config layer)
 
 Reviewed the published `v2` and verified each suspect path by executing it rather than

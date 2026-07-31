@@ -118,6 +118,75 @@ body {
 .admin-switch input:checked + .slider { background: #7a2c2c; border-color: #a33; }
 .admin-switch input:checked + .slider::after { transform: translateX(16px); background: #ffb4b4; }
 
+/* ---------- v2.1: task tabs ---------- */
+.task-title { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 7px; }
+.task-title b { color: var(--text); font-weight: 600; }
+
+.task-tabs {
+  display: flex; gap: 4px; padding: 7px 14px; background: var(--bg2);
+  border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none;
+}
+.task-tabs::-webkit-scrollbar { height: 0; }
+.task-tabs button {
+  flex: none; border: 1px solid transparent; background: transparent; color: var(--muted);
+  font: inherit; font-size: 12.5px; padding: 7px 13px; border-radius: 9px; cursor: pointer;
+  white-space: nowrap; display: flex; align-items: center; gap: 6px;
+}
+.task-tabs button:hover { color: var(--text); background: var(--bg3); }
+.task-tabs button.active {
+  background: var(--bg3); color: var(--text); border-color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* ---------- v2.1: attachments ---------- */
+.attach-tray {
+  display: flex; flex-wrap: wrap; gap: 7px; padding: 10px 8% 0;
+}
+.chip {
+  display: flex; align-items: center; gap: 8px; background: var(--bg3);
+  border: 1px solid var(--border); border-radius: 10px; padding: 6px 10px; font-size: 12px;
+  max-width: 340px;
+}
+.chip.warn { border-color: #5a4a1c; }
+.chip.busy { border-color: var(--accent2); }
+.chip .chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.chip .chip-meta { color: var(--muted); flex: none; }
+.chip .chip-x { cursor: pointer; color: var(--muted); flex: none; }
+.chip .chip-x:hover { color: var(--red); }
+.chip .chip-ocr {
+  flex: none; font-size: 11px; padding: 2px 7px; border-radius: 6px; cursor: pointer;
+  border: 1px solid #5a4a1c; color: var(--amber); background: transparent;
+}
+.chip .chip-ocr:hover { background: #2a2413; }
+
+.composer-tools { display: flex; gap: 5px; align-self: flex-end; padding-bottom: 3px; }
+
+.drop-hint {
+  position: absolute; inset: 0; z-index: 20; display: grid; place-items: center;
+  background: rgba(11, 13, 20, 0.85); border: 2px dashed var(--accent);
+  border-radius: 14px; margin: 12px; font-size: 16px; color: var(--text); pointer-events: none;
+}
+.chat { position: relative; }
+
+/* ---------- v2.1: per-task control bars ---------- */
+.task-bar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 8% 16px; border-top: 1px solid var(--border); background: var(--bg);
+}
+.task-bar label { font-size: 12.5px; color: var(--muted); display: flex; align-items: center; gap: 7px; }
+.task-bar select, .task-bar input[type="number"] {
+  background: var(--bg3); border: 1px solid var(--border); color: var(--text);
+  border-radius: 8px; padding: 6px 9px; font: inherit; font-size: 12.5px; outline: none;
+}
+.task-bar input[type="range"] { accent-color: var(--accent); }
+.ocr-model { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+
+.check-row { display: flex; gap: 9px; align-items: flex-start; font-size: 12.5px; color: var(--muted); margin-bottom: 12px; }
+.check-row input { margin-top: 2px; flex: none; }
+
+.model-card.autopick { border-color: var(--accent2); }
+.badge.auto { color: var(--accent2); border-color: #164b56; }
+
 /* ---------- telemetry ---------- */
 .telemetry {
   display: flex; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--border);

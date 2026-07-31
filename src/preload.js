@@ -55,6 +55,25 @@ contextBridge.exposeInMainWorld('api', {
     test: invoke('providers:test'),
     fetchModels: invoke('providers:fetchModels'),
   },
+  tasks: {
+    list: invoke('tasks:list'),
+    pickModel: invoke('tasks:pickModel'),
+  },
+  ingest: {
+    file: invoke('ingest:file'),
+    url: invoke('ingest:url'),
+    pickFiles: invoke('ingest:pickFiles'),
+  },
+  ocr: {
+    visionModels: invoke('ocr:visionModels'),
+    run: invoke('ocr:run'),
+  },
+  tts: {
+    voices: invoke('tts:voices'),
+    speak: invoke('tts:speak'),
+    stop: invoke('tts:stop'),
+    save: invoke('tts:save'),
+  },
   pickFolder: invoke('dialog:pickFolder'),
   openExternal: invoke('shell:openExternal'),
 });

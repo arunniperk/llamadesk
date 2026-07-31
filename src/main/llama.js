@@ -36,6 +36,13 @@ function serverExe() {
   return findExe(path.join(baseDir(), v.tag), 'llama-server.exe');
 }
 
+// Multimodal CLI — used for OCR / vision (image + mmproj projector).
+function mtmdExe() {
+  const v = installedVersion();
+  if (!v) return null;
+  return findExe(path.join(baseDir(), v.tag), 'llama-mtmd-cli.exe');
+}
+
 async function checkUpdate(backend) {
   const res = await fetch(RELEASES_API, { headers: UA });
   if (!res.ok) throw new Error(`GitHub API ${res.status}`);
@@ -188,4 +195,4 @@ class LlamaServer {
   }
 }
 
-module.exports = { server: new LlamaServer(), checkUpdate, downloadUpdate, installedVersion, serverExe };
+module.exports = { server: new LlamaServer(), checkUpdate, downloadUpdate, installedVersion, serverExe, mtmdExe };

@@ -18,7 +18,10 @@ const state = {
   target: null, // null = local llama-server; {kind:'online', provider, model, label}
   lastOnline: null, // remembered online pick, restored when switching back to Online
   providers: [],
-  mode: 'chat',
+  mode: 'code',        // active task id
+  tasks: [],
+  autoPick: null,      // {path,name,score,reasons} chosen for the current task
+  attachments: [],     // ingested files/URLs riding with the next message
   history: [], // OpenAI messages of current conversation
   streaming: false,
   sparkData: new Array(60).fill(0),
@@ -162,6 +165,12 @@ function renderModelList() {
     if (m.contextLength) meta.appendChild(el('span', '', (m.contextLength / 1024) + 'k ctx'));
     card.appendChild(meta);
     const badges = el('div', 'badges');
+    if (state.autoPick && state.autoPick.path === m.path) {
+      card.classList.add('autopick');
+      const b = el('span', 'badge auto', '★ best for this task');
+      b.title = (state.autoPick.reasons || []).join(', ');
+      badges.appendChild(b);
+    }
     const fitBadge = el('span', 'badge fit-' + m.advice.fit,
       m.advice.fit === 'gpu' ? '✓ fits VRAM' : m.advice.fit === 'hybrid' ? '◐ GPU+RAM' : '✗ too big');
     fitBadge.title = m.advice.fitNote;
@@ -323,7 +332,8 @@ function clearWelcome() {
 }
 function startAssistantMsg() {
   const m = el('div', 'msg assistant');
-  let modeName = { chat: 'Assistant', desktop: 'Desktop Agent', coding: 'Coding Agent' }[state.mode];
+  const t = currentTask();
+  let modeName = t ? t.label : 'Assistant';
   if (state.target && state.target.kind === 'online') modeName += ' · ' + state.target.model;
   m.appendChild(el('div', 'who', modeName));
   const bubble = el('div', 'bubble');
@@ -419,6 +429,10 @@ api.chat.onError(({ message }) => {
 
 async function sendMessage() {
   const input = $('input');
+  const t = currentTask();
+  if (t && t.kind === 'tts') return speakNow();
+  if (t && t.kind === 'ocr') return $('btn-ocr-run').click();
+
   const text = input.value.trim();
   if (!text || state.streaming) return;
   if (state.source === 'online' && !state.target) {
@@ -437,7 +451,14 @@ async function sendMessage() {
   state.streaming = true;
   $('btn-send').classList.add('hidden');
   $('btn-stop').classList.remove('hidden');
-  await api.chat.send({ messages: state.history, mode: state.mode, target: state.target });
+  // Attachments stay in the tray and are re-sent each turn — a document Q&A needs the
+  // source present on every round-trip. Remove a chip to stop paying for it.
+  await api.chat.send({
+    messages: state.history,
+    mode: state.mode,
+    target: state.target,
+    attachments: state.attachments.filter((a) => a.text && a.text.trim()),
+  });
 }
 
 $('btn-send').onclick = sendMessage;
@@ -452,16 +473,66 @@ inputEl.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
 
-// ---------------- mode switch ----------------
-$('mode-switch').addEventListener('click', (e) => {
-  const btn = e.target.closest('button[data-mode]');
-  if (!btn) return;
-  state.mode = btn.dataset.mode;
-  document.querySelectorAll('#mode-switch button').forEach((b) => b.classList.toggle('active', b === btn));
-  toast({ chat: 'Chat mode — plain conversation.',
-    desktop: 'Desktop Agent — model can run PowerShell, use files & MCP tools.',
-    coding: 'Coding Agent — model can read/edit code, run builds & tests.' }[state.mode]);
-});
+// ---------------- tasks (v2.1 tabbed workspace) ----------------
+async function loadTasks() {
+  state.tasks = await api.tasks.list();
+  const strip = $('task-tabs');
+  strip.innerHTML = '';
+  for (const t of state.tasks) {
+    const b = el('button');
+    b.dataset.task = t.id;
+    b.innerHTML = `<span>${t.icon}</span><span>${escapeHtml(t.label)}</span>`;
+    b.title = t.blurb;
+    b.onclick = () => setTask(t.id);
+    strip.appendChild(b);
+  }
+  const saved = (state.settings && state.settings.activeTask) || 'code';
+  setTask(state.tasks.some((t) => t.id === saved) ? saved : state.tasks[0].id, true);
+}
+
+function currentTask() {
+  return state.tasks.find((t) => t.id === state.mode) || state.tasks[0];
+}
+
+async function setTask(id, silent) {
+  state.mode = id;
+  const t = currentTask();
+  if (!t) return;
+  document.querySelectorAll('#task-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.task === id));
+  $('task-title').innerHTML = `${t.icon} <b>${escapeHtml(t.label)}</b>`;
+  $('task-title').title = t.blurb;
+
+  // swap the controls under the transcript
+  const isChat = t.kind === 'chat';
+  document.querySelector('.composer').classList.toggle('hidden', t.kind === 'ocr');
+  $('tts-bar').classList.toggle('hidden', t.kind !== 'tts');
+  $('ocr-bar').classList.toggle('hidden', t.kind !== 'ocr');
+  $('input').placeholder = t.kind === 'tts'
+    ? 'Text to speak — or attach a document and press Speak…'
+    : `${t.label}: ${t.blurb}`;
+  $('btn-send').textContent = t.kind === 'tts' ? '▶ Speak' : 'Send';
+
+  api.settings.set({ activeTask: id });
+  if (!silent) toast(`${t.icon} ${t.label} — ${t.blurb}`);
+  if (t.kind === 'tts') refreshVoices();
+  if (t.kind === 'ocr') refreshOcrBar();
+  if (isChat || t.kind === 'ocr') autoPickModel();
+}
+
+// Ask the main process to rank local models for this task and load the winner.
+async function autoPickModel() {
+  if (!state.settings || state.settings.autoPickModel === false) { state.autoPick = null; renderModelList(); return; }
+  if (state.source === 'online') return;
+  try {
+    const r = await api.tasks.pickModel(state.mode);
+    state.autoPick = r.top || null;
+    renderModelList();
+    if (r.top && !state.loadedModel) {
+      const why = (r.top.reasons || []).join(', ');
+      toast(`Best model for ${r.task.label}: ${r.top.name}${why ? ' (' + why + ')' : ''} — press Load.`);
+    }
+  } catch { state.autoPick = null; }
+}
 
 // ---------------- admin toggle ----------------
 async function refreshAdmin() {
@@ -511,8 +582,59 @@ async function openSettings() {
   renderMcp();
   renderSkills();
   renderProviders();
+  renderVoiceTab();
   refreshLlamaVersion();
 }
+
+// ---- OCR & Voice settings tab ----
+async function renderVoiceTab() {
+  const s = state.settings;
+  $('set-autopick').checked = s.autoPickModel !== false;
+  $('set-ocr-mode').value = s.ocrMode || 'document';
+  $('set-ocr-cpu').checked = !!s.ocrCpuVision;
+
+  let pairs = [];
+  try { pairs = await api.ocr.visionModels(); } catch { /* none */ }
+  const sel = $('set-ocr-model');
+  sel.innerHTML = '';
+  if (!pairs.length) {
+    sel.appendChild(el('option', '', '— no vision model + mmproj pair found —'));
+    $('ocr-pair-info').textContent =
+      'Place a vision GGUF and its mmproj-*.gguf in the same folder inside one of your model folders.';
+  } else {
+    for (const p of pairs) {
+      const o = el('option', '', `${p.name}  (${(p.sizeBytes / 1024 ** 3).toFixed(2)} GB)`);
+      o.value = p.model;
+      o.dataset.mmproj = p.mmproj;
+      sel.appendChild(o);
+    }
+    sel.value = s.ocrModel || pairs[0].model;
+    const cur = pairs.find((p) => p.model === sel.value) || pairs[0];
+    $('ocr-pair-info').textContent = 'Projector: ' + cur.mmproj.split('\\').pop();
+  }
+  refreshVoices();
+}
+$('set-ocr-model').onchange = () => {
+  const opt = $('set-ocr-model').selectedOptions[0];
+  if (!opt || !opt.value) return;
+  $('ocr-pair-info').textContent = 'Projector: ' + (opt.dataset.mmproj || '').split('\\').pop();
+};
+$('btn-voice-save').onclick = async () => {
+  const opt = $('set-ocr-model').selectedOptions[0];
+  state.settings = await api.settings.set({
+    autoPickModel: $('set-autopick').checked,
+    ocrModel: opt && opt.value ? opt.value : '',
+    ocrMmproj: opt && opt.dataset.mmproj ? opt.dataset.mmproj : '',
+    ocrMode: $('set-ocr-mode').value,
+    ocrCpuVision: $('set-ocr-cpu').checked,
+    ttsVoice: $('set-tts-voice').value || '',
+    ttsRate: +$('set-tts-rate').value || 0,
+  });
+  $('voice-saved').textContent = 'Saved ✓';
+  setTimeout(() => ($('voice-saved').textContent = ''), 3000);
+  refreshOcrBar();
+  autoPickModel();
+};
 
 function renderDirs() {
   const box = $('dir-list');
@@ -612,6 +734,206 @@ api.llama.onUpdateProgress((pct) => {
   p.querySelector('i').style.width = pct + '%';
   p.querySelector('span').textContent = pct + '%';
 });
+
+// ---------------- attachments (v2.1) ----------------
+const fmtBytes = (b) => (b >= 1024 ** 2 ? (b / 1024 ** 2).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
+
+function renderAttachments() {
+  const tray = $('attach-tray');
+  tray.innerHTML = '';
+  tray.classList.toggle('hidden', state.attachments.length === 0);
+  state.attachments.forEach((a, idx) => {
+    const chip = el('div', 'chip' + (a.needsOcr ? ' warn' : '') + (a.busy ? ' busy' : ''));
+    chip.appendChild(el('span', 'chip-name', a.name));
+    const bits = [];
+    if (a.busy) bits.push('reading…');
+    else if (a.needsOcr) bits.push(a.kind === 'image' ? 'image' : 'no text');
+    else bits.push(`${a.chars.toLocaleString()} chars`);
+    if (a.pages) bits.push(`${a.pages}p`);
+    if (a.truncated) bits.push('truncated');
+    chip.appendChild(el('span', 'chip-meta', bits.join(' · ')));
+    if (a.note) chip.title = a.note;
+
+    if (a.needsOcr && a.path && !a.busy) {
+      const b = el('button', 'chip-ocr', '🔍 OCR');
+      b.title = a.note || 'Read this with the local vision model';
+      b.onclick = () => ocrAttachment(idx);
+      chip.appendChild(b);
+    }
+    const x = el('span', 'chip-x', '✕');
+    x.onclick = () => { state.attachments.splice(idx, 1); renderAttachments(); };
+    chip.appendChild(x);
+    tray.appendChild(chip);
+  });
+}
+
+async function addFiles(paths) {
+  for (const p of paths) {
+    const placeholder = { name: p.split('\\').pop(), path: p, busy: true, chars: 0 };
+    state.attachments.push(placeholder);
+    renderAttachments();
+    try {
+      const a = await api.ingest.file(p);
+      Object.assign(placeholder, a, { busy: false });
+      if (a.note) toast(`${a.name}: ${a.note}`, a.needsOcr);
+    } catch (err) {
+      state.attachments.splice(state.attachments.indexOf(placeholder), 1);
+      toast(cleanErr(err), true);
+    }
+    renderAttachments();
+  }
+}
+
+function cleanErr(err) {
+  return String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+}
+
+$('btn-attach').onclick = async () => {
+  const paths = await api.ingest.pickFiles();
+  if (paths.length) addFiles(paths);
+};
+$('btn-attach-url').onclick = async () => {
+  const url = prompt('Web page or PDF URL:');
+  if (!url) return;
+  const placeholder = { name: url, busy: true, chars: 0 };
+  state.attachments.push(placeholder);
+  renderAttachments();
+  try {
+    const a = await api.ingest.url(url.trim());
+    Object.assign(placeholder, a, { busy: false });
+    toast(`Fetched ${a.name} (${a.chars.toLocaleString()} chars)`);
+  } catch (err) {
+    state.attachments.splice(state.attachments.indexOf(placeholder), 1);
+    toast(cleanErr(err), true);
+  }
+  renderAttachments();
+};
+
+// drag & drop anywhere over the transcript
+const chatEl = $('chat');
+let dragDepth = 0;
+chatEl.addEventListener('dragenter', (e) => { e.preventDefault(); dragDepth++; $('drop-hint').classList.remove('hidden'); });
+chatEl.addEventListener('dragover', (e) => e.preventDefault());
+chatEl.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; $('drop-hint').classList.add('hidden'); } });
+chatEl.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dragDepth = 0;
+  $('drop-hint').classList.add('hidden');
+  const paths = [...(e.dataTransfer.files || [])].map((f) => f.path).filter(Boolean);
+  if (paths.length) addFiles(paths);
+});
+
+async function ocrAttachment(idx) {
+  const a = state.attachments[idx];
+  if (!a || !a.path) return;
+  a.busy = true; renderAttachments();
+  try {
+    const r = await api.ocr.run({ imagePath: a.path, mode: $('ocr-mode').value });
+    a.text = r.text;
+    a.chars = r.text.length;
+    a.needsOcr = false;
+    a.note = `Read by OCR in ${r.seconds}s`;
+    toast(`OCR done: ${a.name} → ${r.text.length.toLocaleString()} chars in ${r.seconds}s`);
+  } catch (err) {
+    toast(cleanErr(err), true);
+  } finally {
+    a.busy = false;
+    renderAttachments();
+  }
+}
+
+// ---------------- OCR task ----------------
+async function refreshOcrBar() {
+  const s = await api.settings.get();
+  state.settings = s;
+  $('ocr-mode').value = s.ocrMode || 'document';
+  const name = s.ocrModel ? s.ocrModel.split('\\').pop() : '';
+  $('ocr-model-name').textContent = name || 'no vision model selected';
+  $('ocr-model-name').title = s.ocrModel || '';
+}
+$('btn-ocr-settings').onclick = () => {
+  openSettings();
+  document.querySelector('#settings-tabs button[data-tab="voice"]').click();
+};
+$('ocr-mode').onchange = () => api.settings.set({ ocrMode: $('ocr-mode').value });
+$('btn-ocr-run').onclick = async () => {
+  const targets = state.attachments.filter((a) => a.path && (a.needsOcr || a.kind === 'image' || a.kind === 'pdf'));
+  if (!targets.length) { toast('Attach an image or scanned PDF first (📎 or drag it in).', true); return; }
+  clearWelcome();
+  for (const a of targets) {
+    const idx = state.attachments.indexOf(a);
+    addUserMsg(`🔍 OCR: ${a.name}`);
+    startAssistantMsg();
+    await ocrAttachment(idx);
+    if (curAssistant) {
+      curAssistant.raw = state.attachments[idx].text || '(no text recovered)';
+      curAssistant.contentEl.innerHTML = renderMarkdown(curAssistant.raw);
+      curAssistant.meta.textContent = state.attachments[idx].note || '';
+      curAssistant = null;
+    }
+  }
+};
+
+// ---------------- TTS task ----------------
+async function refreshVoices() {
+  const s = await api.settings.get();
+  state.settings = s;
+  let voices = [];
+  try { voices = await api.tts.voices(); } catch { /* reported below */ }
+  const fill = (sel) => {
+    sel.innerHTML = '';
+    if (!voices.length) { sel.appendChild(el('option', '', 'no voices installed')); return; }
+    for (const v of voices) {
+      const o = el('option', '', `${v.name} (${v.culture})`);
+      o.value = v.name;
+      sel.appendChild(o);
+    }
+    sel.value = s.ttsVoice || voices[0].name;
+  };
+  fill($('tts-voice'));
+  fill($('set-tts-voice'));
+  $('tts-rate').value = s.ttsRate || 0;
+  $('tts-rate-val').textContent = String(s.ttsRate || 0);
+}
+$('tts-voice').onchange = () => api.settings.set({ ttsVoice: $('tts-voice').value });
+$('tts-rate').oninput = () => {
+  $('tts-rate-val').textContent = $('tts-rate').value;
+  api.settings.set({ ttsRate: +$('tts-rate').value });
+};
+
+// Text for TTS: whatever is typed, else the attached documents.
+function ttsText() {
+  const typed = $('input').value.trim();
+  if (typed) return typed;
+  const fromFiles = state.attachments.filter((a) => a.text && a.text.trim()).map((a) => a.text).join('\n\n');
+  return fromFiles;
+}
+async function speakNow() {
+  const text = ttsText();
+  if (!text) { toast('Type something, or attach a document to read aloud.', true); return; }
+  $('btn-tts-speak').classList.add('hidden');
+  $('btn-tts-stop').classList.remove('hidden');
+  clearWelcome();
+  addUserMsg(text.length > 400 ? text.slice(0, 400) + '…' : text);
+  try {
+    const r = await api.tts.speak(text);
+    toast(r && r.stopped ? 'Playback stopped.' : 'Finished speaking.');
+  } catch (err) { toast(cleanErr(err), true); }
+  finally {
+    $('btn-tts-speak').classList.remove('hidden');
+    $('btn-tts-stop').classList.add('hidden');
+  }
+}
+$('btn-tts-speak').onclick = speakNow;
+$('btn-tts-stop').onclick = () => api.tts.stop();
+$('btn-tts-save').onclick = async () => {
+  const text = ttsText();
+  if (!text) { toast('Nothing to save — type or attach some text first.', true); return; }
+  try {
+    const r = await api.tts.save(text);
+    if (r) toast(`Saved ${r.path} (${fmtBytes(r.bytes)})`);
+  } catch (err) { toast(cleanErr(err), true); }
+};
 
 // ---------------- providers (v2) ----------------
 async function renderProviders() {
@@ -842,6 +1164,7 @@ $('btn-skill-folder').onclick = async () => {
   state.settings = await api.settings.get();
   setSource(state.source); // keep the switch/panes in step with state, not just the markup
   await rescanModels();
+  await loadTasks();
   refreshProviders();
   refreshAdmin();
   refreshLlamaVersion();

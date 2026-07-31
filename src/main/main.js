@@ -10,6 +10,10 @@ const mcp = require('./mcp');
 const skillsMod = require('./skills');
 const elevation = require('./elevation');
 const providers = require('./providers');
+const tasksMod = require('./tasks');
+const ingest = require('./ingest');
+const ocr = require('./ocr');
+const tts = require('./tts');
 
 let win = null;
 const send = (ch, payload) => { if (win && !win.isDestroyed()) win.webContents.send(ch, payload); };
@@ -61,11 +65,69 @@ ipcMain.handle('llama:update', async () => {
   return r;
 });
 
-ipcMain.handle('chat:send', (_e, { messages, mode, target }) => {
+ipcMain.handle('chat:send', (_e, { messages, mode, target, attachments }) => {
   const s = settings.load();
-  agent.run({ messages, mode, settings: s, target }, (event, payload) => send('chat:' + event, payload))
+  agent.run({ messages, mode, settings: s, target, attachments },
+    (event, payload) => send('chat:' + event, payload))
     .catch((err) => send('chat:error', { message: String(err.message || err) }));
   return true;
+});
+
+// ---- v2.1 workspace: tasks, attachments, OCR, TTS ----
+ipcMain.handle('tasks:list', () => tasksMod.listForUi());
+
+// Rank the scanned models for a task and return the auto-pick plus runners-up.
+ipcMain.handle('tasks:pickModel', (_e, taskId) => {
+  const s = settings.load();
+  const task = tasksMod.get(taskId);
+  const found = models.scan(s.modelDirs, s.vramGB, s.ramGB);
+  const { top, ranked } = models.pickFor(found, task);
+  const slim = (r) => r && ({
+    path: r.model.path, name: r.model.name, file: r.model.file,
+    sizeBytes: r.model.sizeBytes, quant: r.model.quant, contextLength: r.model.contextLength,
+    fit: r.model.advice.fit, score: r.score, reasons: r.reasons || [],
+  });
+  return { task: { id: task.id, label: task.label, kind: task.kind }, top: slim(top), ranked: ranked.map(slim) };
+});
+
+ipcMain.handle('ingest:file', async (_e, filePath) => ingest.ingestFile(filePath));
+ipcMain.handle('ingest:url', async (_e, url) => ingest.ingestUrl(url));
+ipcMain.handle('ingest:pickFiles', async () => {
+  const r = await dialog.showOpenDialog(win, {
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: 'All supported', extensions: ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md', 'csv', 'json', 'html', 'htm', 'xml', 'log', 'png', 'jpg', 'jpeg', 'webp', 'bmp', 'tif', 'tiff'] },
+      { name: 'Documents', extensions: ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md', 'csv'] },
+      { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'tif', 'tiff'] },
+      { name: 'All files', extensions: ['*'] },
+    ],
+  });
+  return r.canceled ? [] : r.filePaths;
+});
+
+ipcMain.handle('ocr:visionModels', () => ocr.findVisionPairs(settings.load().modelDirs));
+ipcMain.handle('ocr:run', async (_e, { imagePath, mode }) => {
+  const s = settings.load();
+  return ocr.run(imagePath, {
+    model: s.ocrModel, mmproj: s.ocrMmproj,
+    mode: mode || s.ocrMode, cpuVision: s.ocrCpuVision, ctx: s.ctxSize,
+  });
+});
+
+ipcMain.handle('tts:voices', () => tts.voices());
+ipcMain.handle('tts:speak', async (_e, text) => {
+  const s = settings.load();
+  return tts.speak(text, { voice: s.ttsVoice, rate: s.ttsRate });
+});
+ipcMain.handle('tts:stop', () => tts.stop());
+ipcMain.handle('tts:save', async (_e, text) => {
+  const s = settings.load();
+  const r = await dialog.showSaveDialog(win, {
+    defaultPath: path.join(app.getPath('music'), 'llamadesk-speech.wav'),
+    filters: [{ name: 'WAV audio', extensions: ['wav'] }],
+  });
+  if (r.canceled) return null;
+  return tts.save(text, r.filePath, { voice: s.ttsVoice, rate: s.ttsRate });
 });
 
 // ---- online providers (v2) ----

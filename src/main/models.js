@@ -93,12 +93,61 @@ function classify(name) {
   const n = name.toLowerCase();
   const tags = [];
   if (/(coder|codestral|starcoder|codellama|codegeex|deepseek-?coder|devstral)/.test(n)) tags.push('coding');
-  if (/(-vl|vision|llava|minicpm-v|pixtral)/.test(n)) tags.push('vision');
+  if (/(-vl|vision|llava|minicpm-v|pixtral|ocr)/.test(n)) tags.push('vision');
   if (/(instruct|-it\b|-it-|chat|assistant)/.test(n)) tags.push('chat');
   if (/(qwen|llama-?3|llama3|mistral|ministral|hermes|functionary|command-r|glm|deepseek|granite|phi-4|gemma-?3|gpt-oss|nemotron|smollm)/.test(n)) tags.push('tools');
   if (/(embed|bge-|e5-)/.test(n)) tags.push('embedding');
   if (tags.length === 0) tags.push('chat');
   return tags;
+}
+
+// A 0-10 capability profile per model, inferred from name, architecture, context
+// length and parameter size. Deliberately heuristic — it ranks what the user
+// actually has on disk, it does not pretend to be a benchmark.
+function capabilities(m) {
+  const n = (m.file + ' ' + m.name).toLowerCase();
+  const params = paramB(m);           // rough parameter count in billions
+  const scale = Math.min(10, 2 + Math.log2(Math.max(params, 1)) * 2.2); // 3B≈5.5, 14B≈10
+  const caps = { coding: 0, tools: 0, reasoning: 0, creative: 0, longctx: 0, vision: 0, uncensored: 0, embedding: 0 };
+
+  if (/(embed|bge-|e5-|gte-)/.test(n)) { caps.embedding = 10; return caps; }
+
+  const isCoder = /(coder|codestral|starcoder|codellama|codegeex|deepseek-?coder|devstral|code)/.test(n);
+  const isVision = /(-vl|vision|llava|minicpm-v|pixtral|ocr|qwen.?vl)/.test(n);
+  const isReasoner = /(reason|thinking|-r1|deepseek-r1|qwq|thinkingcap|o1|marco-o1)/.test(n);
+  const isUncensored = /(abliterat|uncensored|dolphin|heretic|unrestricted)/.test(n);
+  const knownToolFamily = /(qwen|llama-?3|mistral|ministral|hermes|functionary|command-r|glm|deepseek|granite|phi-[34]|gemma-?[34]|gpt-oss|nemotron|smollm|ornith|mythos)/.test(n);
+
+  caps.coding = isCoder ? Math.min(10, scale + 2) : scale * 0.55;
+  caps.tools = knownToolFamily ? scale * 0.9 : scale * 0.4;
+  caps.reasoning = isReasoner ? Math.min(10, scale + 2) : scale * 0.7;
+  caps.creative = scale * 0.6 + (isUncensored ? 3 : 0);
+  caps.vision = isVision ? Math.min(10, scale + 3) : 0;
+  caps.uncensored = isUncensored ? 10 : 0;
+
+  // context length is a real, measured property — use it directly
+  const ctx = m.contextLength || 0;
+  caps.longctx = ctx >= 500000 ? 10 : ctx >= 200000 ? 9 : ctx >= 128000 ? 8
+    : ctx >= 64000 ? 6 : ctx >= 32000 ? 4.5 : ctx >= 16000 ? 3 : ctx > 0 ? 1.5 : 2;
+
+  for (const k of Object.keys(caps)) caps[k] = Math.round(Math.min(10, caps[k]) * 10) / 10;
+  return caps;
+}
+
+// Parameter count in billions, from the size label / filename, else from file size.
+function paramB(m) {
+  const hay = (m.file + ' ' + m.name).replace(/,/g, '');
+  // "35B-A3B" → treat as its ACTIVE size for speed-ish scaling but total for capability;
+  // capability tracks total, which is the first number.
+  const tag = hay.match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*([bm])\b/i); // 64x550M
+  if (tag) {
+    const each = parseFloat(tag[2]) * (tag[3].toLowerCase() === 'm' ? 0.001 : 1);
+    return parseFloat(tag[1]) * each;
+  }
+  const b = hay.match(/(\d+(?:\.\d+)?)\s*b\b/i);
+  if (b) return parseFloat(b[1]);
+  // fall back to file size: ~0.6 GB per B at Q4-ish
+  return Math.max(0.5, m.sizeBytes / 1024 ** 3 / 0.6);
 }
 
 function advise(model, vramGB, ramGB) {
@@ -152,6 +201,7 @@ function scan(dirs, vramGB, ramGB) {
           tags: classify(e.name + ' ' + (meta['general.name'] || '')),
         };
         m.advice = advise(m, vramGB, ramGB);
+        m.caps = capabilities(m);
         found.push(m);
       }
     }
@@ -176,4 +226,47 @@ function suggest(models) {
   };
 }
 
-module.exports = { scan, suggest };
+// ---- per-task model selection -------------------------------------------------
+// Score every model against a task's capability weights, then rank. Fitting the
+// GPU is worth a lot (it is the difference between fast and unusably slow), and a
+// task's minimum context is a hard-ish requirement rather than a preference.
+function scoreFor(m, task) {
+  const wants = task.wants || {};
+  const weightSum = Object.values(wants).reduce((a, b) => a + b, 0) || 1;
+  let capScore = 0;
+  for (const [cap, w] of Object.entries(wants)) capScore += (m.caps[cap] || 0) * w;
+  capScore = capScore / weightSum; // 0..10
+
+  // embeddings are never a chat/vision answer
+  if (m.caps.embedding >= 10 && !(wants.embedding)) return { score: -1, capScore, why: 'embedding model' };
+
+  const reasons = [];
+  let score = capScore * 10; // 0..100
+
+  if (m.advice.fit === 'gpu') { score += 22; reasons.push('fits VRAM'); }
+  else if (m.advice.fit === 'hybrid') { score -= 6; reasons.push('GPU+RAM offload'); }
+  else { score -= 40; reasons.push('too large for this PC'); }
+
+  const ctx = m.contextLength || 0;
+  if (task.minCtx && ctx > 0 && ctx < task.minCtx) {
+    score -= 25;
+    reasons.push(`context ${Math.round(ctx / 1024)}k < ${Math.round(task.minCtx / 1024)}k needed`);
+  }
+  if (task.kind === 'ocr' && m.caps.vision <= 0) return { score: -1, capScore, why: 'not a vision model' };
+
+  return { score: Math.round(score * 10) / 10, capScore: Math.round(capScore * 10) / 10, reasons };
+}
+
+// Ranked candidates for a task. `top` is the auto-pick.
+function pickFor(models, task, limit = 4) {
+  const ranked = models
+    .map((m) => ({ model: m, ...scoreFor(m, task) }))
+    .filter((r) => r.score >= 0)
+    .sort((a, b) => b.score - a.score);
+  return {
+    top: ranked[0] || null,
+    ranked: ranked.slice(0, limit),
+  };
+}
+
+module.exports = { scan, suggest, capabilities, pickFor, scoreFor };

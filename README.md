@@ -46,6 +46,34 @@ Ryzen 7 5800X / 64 GB RAM / Radeon RX 9070 XT (16 GB) machine, but works on any 
 - Per-provider **Test** (key check) and **Fetch** (live model list) buttons in
   Settings → Providers.
 
+## New in 2.1 — Tabbed workspace, attachments, TTS & OCR
+
+**Eight task tabs**, each with its own system prompt, tool policy, sampling defaults and
+model preference:
+
+| Tab | Does | Tools |
+|---|---|---|
+| ⌨️ Code Assistance | Draft, refactor, boilerplate | full |
+| 🧾 Data Extraction | Text → JSON / CSV / tables (temp 0) | read-only |
+| 📄 Document Vetting | Long PDFs, clauses, summaries | read-only |
+| 🖥️ Terminal & System | PowerShell, files, automation | full |
+| 🎨 Prompt Generation | Cinematic image/video prompts | none |
+| 🎓 Interactive Tutoring | Step-by-step STEM mentoring | read-only |
+| 🔊 Text to Speech | Offline Windows voices → speakers or .wav | none |
+| 🔍 OCR | Images & scanned PDFs → text | none |
+
+**Attachments** — drag files onto the transcript, or use 📎 / 🔗. Handled natively with no
+external dependencies: **PDF** (text extraction with a decode-quality check), **DOCX /
+XLSX / PPTX**, **HTML**, plain text and code, plus **web pages and PDFs by URL**. Images and
+scanned PDFs are detected and offered a one-click **OCR** button rather than silently
+contributing nothing.
+
+**Automatic model selection** — each task ranks your local models on inferred capability
+(coding, reasoning, long-context, vision, tool use), VRAM fit and context length, then marks
+the winner with ★ in the sidebar. Toggle it off in Settings → OCR & Voice.
+
+**Text to speech** uses the built-in Windows SAPI voices — no model download, no network.
+
 ## Getting started
 
 1. Install with `dist/LlamaDesk-Setup-1.0.0.exe` (or run from source: `npm install && npm start`).
