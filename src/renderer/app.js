@@ -22,6 +22,7 @@ const state = {
   tasks: [],
   autoPick: null,      // {path,name,score,reasons} chosen for the current task
   attachments: [],     // ingested files/URLs riding with the next message
+  voices: [],          // merged SAPI5 + OneCore voice list
   history: [], // OpenAI messages of current conversation
   streaming: false,
   sparkData: new Array(60).fill(0),
@@ -627,9 +628,10 @@ $('btn-voice-save').onclick = async () => {
     ocrMmproj: opt && opt.dataset.mmproj ? opt.dataset.mmproj : '',
     ocrMode: $('set-ocr-mode').value,
     ocrCpuVision: $('set-ocr-cpu').checked,
-    ttsVoice: $('set-tts-voice').value || '',
+    ttsVoice: $('set-tts-voice').value || state.settings.ttsVoice || '',
     ttsRate: +$('set-tts-rate').value || 0,
   });
+  refreshVoices();
   $('voice-saved').textContent = 'Saved ✓';
   setTimeout(() => ($('voice-saved').textContent = ''), 3000);
   refreshOcrBar();
@@ -875,31 +877,142 @@ $('btn-ocr-run').onclick = async () => {
 };
 
 // ---------------- TTS task ----------------
+// Cascading Language → Type (gender) → Voice, mirrored in the composer bar and in
+// Settings. Both views drive the same helper so they can never disagree.
 async function refreshVoices() {
   const s = await api.settings.get();
   state.settings = s;
-  let voices = [];
-  try { voices = await api.tts.voices(); } catch { /* reported below */ }
-  const fill = (sel) => {
-    sel.innerHTML = '';
-    if (!voices.length) { sel.appendChild(el('option', '', 'no voices installed')); return; }
-    for (const v of voices) {
-      const o = el('option', '', `${v.name} (${v.culture})`);
-      o.value = v.name;
-      sel.appendChild(o);
-    }
-    sel.value = s.ttsVoice || voices[0].name;
-  };
-  fill($('tts-voice'));
-  fill($('set-tts-voice'));
+  if (!state.voices || !state.voices.length) {
+    try { state.voices = await api.tts.voices(); } catch { state.voices = []; }
+  }
+  paintVoicePickers('tts-lang', 'tts-gender', 'tts-voice');
+  paintVoicePickers('set-tts-lang', 'set-tts-gender', 'set-tts-voice');
   $('tts-rate').value = s.ttsRate || 0;
   $('tts-rate-val').textContent = String(s.ttsRate || 0);
+  const setRate = $('set-tts-rate');
+  if (setRate) setRate.value = s.ttsRate || 0;
+
+  const hint = $('tts-install-hint');
+  if (hint) {
+    const langs = new Set(state.voices.map((v) => v.language));
+    hint.innerHTML = state.voices.length
+      ? `${state.voices.length} voice(s) across ${langs.size} language(s). More languages: Windows <b>Settings → Time &amp; language → Language &amp; region</b>, add a language, then its <b>Speech</b> optional feature.`
+      : 'No speech voices found. Add one via Windows <b>Settings → Time &amp; language → Speech</b>.';
+  }
 }
-$('tts-voice').onchange = () => api.settings.set({ ttsVoice: $('tts-voice').value });
+
+// Fill the three selects, honouring the saved voice and keeping choices consistent.
+function paintVoicePickers(langId, genderId, voiceId) {
+  const langSel = $(langId), genSel = $(genderId), voiceSel = $(voiceId);
+  if (!langSel || !genSel || !voiceSel) return;
+  const voices = state.voices || [];
+  if (!voices.length) {
+    for (const sel of [langSel, genSel, voiceSel]) {
+      sel.innerHTML = '';
+      sel.appendChild(el('option', '', 'none installed'));
+    }
+    return;
+  }
+
+  const saved = voices.find((v) => v.id === state.settings.ttsVoice)
+    || voices.find((v) => v.name === state.settings.ttsVoice)
+    || voices[0];
+
+  // languages
+  const langs = [...new Set(voices.map((v) => v.language))].sort();
+  const wantLang = langSel.dataset.touched ? langSel.value : saved.language;
+  langSel.innerHTML = '';
+  for (const l of langs) {
+    const o = el('option', '', l);
+    o.value = l;
+    langSel.appendChild(o);
+  }
+  langSel.value = langs.includes(wantLang) ? wantLang : langs[0];
+
+  // genders available within that language
+  const inLang = voices.filter((v) => v.language === langSel.value);
+  const genders = [...new Set(inLang.map((v) => v.gender))].sort();
+  const wantGen = genSel.dataset.touched && genders.includes(genSel.value) ? genSel.value
+    : (genders.includes(saved.gender) ? saved.gender : genders[0]);
+  genSel.innerHTML = '';
+  const anyOpt = el('option', '', 'Any');
+  anyOpt.value = '';
+  genSel.appendChild(anyOpt);
+  for (const g of genders) {
+    const o = el('option', '', g);
+    o.value = g;
+    genSel.appendChild(o);
+  }
+  genSel.value = wantGen || '';
+
+  // voices matching both
+  const pool = inLang.filter((v) => !genSel.value || v.gender === genSel.value);
+  voiceSel.innerHTML = '';
+  for (const v of pool) {
+    const o = el('option', '', `${v.name} · ${v.gender}`);
+    o.value = v.id;
+    o.title = `${v.language} (${v.locale}) — ${v.engine === 'winrt' ? 'OneCore' : 'SAPI5'} engine`;
+    voiceSel.appendChild(o);
+  }
+  voiceSel.value = pool.some((v) => v.id === saved.id) ? saved.id : (pool[0] ? pool[0].id : '');
+
+  const info = $('tts-voice-info');
+  if (info) {
+    const v = voices.find((x) => x.id === voiceSel.value);
+    info.textContent = v ? `${v.locale} · ${v.engine === 'winrt' ? 'OneCore' : 'SAPI5'} engine` : '';
+  }
+}
+
+function wireVoicePickers(langId, genderId, voiceId) {
+  const langSel = $(langId), genSel = $(genderId), voiceSel = $(voiceId);
+  if (!langSel) return;
+  langSel.onchange = () => {
+    langSel.dataset.touched = '1';
+    genSel.dataset.touched = '';
+    paintVoicePickers(langId, genderId, voiceId);
+    saveVoice(voiceSel.value);
+  };
+  genSel.onchange = () => {
+    genSel.dataset.touched = '1';
+    paintVoicePickers(langId, genderId, voiceId);
+    saveVoice(voiceSel.value);
+  };
+  voiceSel.onchange = () => saveVoice(voiceSel.value);
+}
+async function saveVoice(id) {
+  if (!id) return;
+  state.settings = await api.settings.set({ ttsVoice: id });
+  // keep the other view in step
+  paintVoicePickers('tts-lang', 'tts-gender', 'tts-voice');
+  paintVoicePickers('set-tts-lang', 'set-tts-gender', 'set-tts-voice');
+}
+wireVoicePickers('tts-lang', 'tts-gender', 'tts-voice');
+wireVoicePickers('set-tts-lang', 'set-tts-gender', 'set-tts-voice');
+
 $('tts-rate').oninput = () => {
   $('tts-rate-val').textContent = $('tts-rate').value;
   api.settings.set({ ttsRate: +$('tts-rate').value });
 };
+
+// Short sample in the voice's own language.
+async function playDemo(voiceSelId, btn) {
+  const id = $(voiceSelId) ? $(voiceSelId).value : '';
+  const v = (state.voices || []).find((x) => x.id === id);
+  if (!v) { toast('No voice selected.', true); return; }
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '🔈 Playing…';
+  try {
+    await api.tts.preview(id);
+  } catch (err) {
+    toast(cleanErr(err), true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+$('btn-tts-demo').onclick = (e) => playDemo('tts-voice', e.currentTarget);
+if ($('btn-set-tts-demo')) $('btn-set-tts-demo').onclick = (e) => playDemo('set-tts-voice', e.currentTarget);
 
 // Text for TTS: whatever is typed, else the attached documents.
 function ttsText() {

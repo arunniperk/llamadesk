@@ -109,10 +109,11 @@
 
         <!-- Text to Speech controls (shown for the TTS task) -->
         <div id="tts-bar" class="task-bar hidden">
-          <label>Voice
-            <select id="tts-voice"></select>
-          </label>
+          <label>Language <select id="tts-lang"></select></label>
+          <label>Type <select id="tts-gender"></select></label>
+          <label>Voice <select id="tts-voice"></select></label>
           <label>Rate <input id="tts-rate" type="range" min="-10" max="10" step="1" value="0" /><span id="tts-rate-val">0</span></label>
+          <button id="btn-tts-demo" class="btn subtle small" title="Hear a short sample in this voice's own language">🔈 Demo</button>
           <button id="btn-tts-speak" class="btn primary small">▶ Speak</button>
           <button id="btn-tts-stop" class="btn danger small hidden">■ Stop</button>
           <button id="btn-tts-save" class="btn subtle small">💾 Save WAV</button>
@@ -256,11 +257,20 @@
           <div id="ocr-pair-info" class="muted"></div>
 
           <h3>Text to speech</h3>
-          <p class="muted">Uses the offline Windows voices (SAPI) — no model download, no network.</p>
+          <p class="muted">Uses the offline Windows voices — no model download, no network.
+            Voices are read from <b>both</b> engines: classic SAPI5 and the modern OneCore set
+            (which usually has more languages installed, e.g. English&nbsp;(India)).</p>
           <div class="form-grid">
+            <label>Language <select id="set-tts-lang"></select></label>
+            <label>Type <select id="set-tts-gender"></select></label>
             <label>Voice <select id="set-tts-voice"></select></label>
             <label>Rate (−10 … 10) <input id="set-tts-rate" type="number" min="-10" max="10" step="1" /></label>
           </div>
+          <div class="row-gap">
+            <button id="btn-set-tts-demo" class="btn subtle small">🔈 Play demo</button>
+            <span id="tts-voice-info" class="muted" style="margin:0"></span>
+          </div>
+          <div id="tts-install-hint" class="muted"></div>
           <button id="btn-voice-save" class="btn primary small">Save</button>
           <span id="voice-saved" class="saved-note"></span>
         </div>

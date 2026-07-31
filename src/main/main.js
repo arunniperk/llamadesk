@@ -114,10 +114,14 @@ ipcMain.handle('ocr:run', async (_e, { imagePath, mode }) => {
   });
 });
 
-ipcMain.handle('tts:voices', () => tts.voices());
+ipcMain.handle('tts:voices', (_e, opts) => tts.voices(opts || {}));
 ipcMain.handle('tts:speak', async (_e, text) => {
   const s = settings.load();
   return tts.speak(text, { voice: s.ttsVoice, rate: s.ttsRate });
+});
+ipcMain.handle('tts:preview', async (_e, voiceId) => {
+  const s = settings.load();
+  return tts.preview(voiceId || s.ttsVoice, s.ttsRate);
 });
 ipcMain.handle('tts:stop', () => tts.stop());
 ipcMain.handle('tts:save', async (_e, text) => {

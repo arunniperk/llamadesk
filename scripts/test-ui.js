@@ -53,7 +53,37 @@ app.whenReady().then(async () => {
     check('send button relabelled to Speak',
       (await js(`document.getElementById('btn-send').textContent`)).includes('Speak'));
     const voices = await js(`[...document.getElementById('tts-voice').options].map(o=>o.value)`);
-    check('voice list populated from Windows SAPI', voices.length > 0 && voices[0].length > 0, voices.join(' | '));
+    check('voice list populated from Windows', voices.length > 0 && voices[0].length > 0, voices.join(' | '));
+
+    // cascading Language → Type → Voice
+    const langs = await js(`[...document.getElementById('tts-lang').options].map(o=>o.value)`);
+    check('language selector populated', langs.length > 0, langs.join(' | '));
+    check('languages are human-readable, not raw tags',
+      langs.every((l) => !/^[a-z]{2}-[A-Z]{2}$/.test(l)), langs.join(' | '));
+    const genders = await js(`[...document.getElementById('tts-gender').options].map(o=>o.textContent)`);
+    check('type selector offers Any + genders', genders.includes('Any') && genders.length > 1, genders.join(' | '));
+    check('demo button present', await js(`!!document.getElementById('btn-tts-demo')`));
+
+    if (langs.length > 1) {
+      // switching language must re-filter the voice list to that language only
+      const curLang = await js(`document.getElementById('tts-lang').value`);
+      const other = langs.find((l) => l !== curLang);
+      await js(`(() => { const s=document.getElementById('tts-lang'); s.value=${JSON.stringify(other)};
+        s.dispatchEvent(new Event('change')); })()`);
+      await wait(700);
+      const titles = await js(`[...document.getElementById('tts-voice').options].map(o=>o.title)`);
+      check('changing language re-filters the voice list',
+        titles.length > 0 && titles.every((t) => t.startsWith(other)), `${other} → ${titles.join(' | ')}`);
+    }
+
+    // filtering by gender must narrow the voice list
+    await js(`(() => { const g=document.getElementById('tts-gender');
+      const male=[...g.options].find(o=>o.value==='Male'); if(male){ g.value='Male';
+      g.dispatchEvent(new Event('change')); } })()`);
+    await wait(700);
+    const maleOpts = await js(`[...document.getElementById('tts-voice').options].map(o=>o.textContent)`);
+    check('gender filter narrows the voice list',
+      maleOpts.length === 0 || maleOpts.every((t) => t.includes('Male')), maleOpts.join(' | '));
 
     // ---------- switching to OCR ----------
     console.log('\n-- OCR task --');

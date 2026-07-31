@@ -1,5 +1,42 @@
 # Progress log
 
+## 2026-07-31 — v2.1.1: TTS voice picker (language / type / voice) + demo
+
+Reported: TTS should let you choose voice type, locale and language, with a small demo.
+
+Root discovery while implementing: **the v2.1.0 TTS could only see 2 of the 5 voices
+installed on this machine.** Windows splits voices across SAPI5 and OneCore registries;
+`System.Speech` reads only the former, so Heera and Ravi (en-IN) were present but
+unreachable. See findings.md.
+
+Executed:
+- `tts.js` rewritten around **two engines**. `voices()` merges WinRT
+  (`Windows.Media.SpeechSynthesis`, via the PowerShell `AsTask` interop) with
+  `System.Speech`, de-duplicating on (person, locale) and returning
+  `{id, name, engine, locale, language, gender}` with `id = engine|name`.
+- Speaking, saving and previewing dispatch per engine. WinRT has no `Rate` property, so
+  speed goes through an SSML `<prosody rate='±N%'>` wrapper; SAPI keeps its `Rate`.
+- `localeName()` maps BCP-47 to readable names ("en-IN" → "English (India)"), covering the
+  major Indian languages alongside the usual European/CJK set.
+- `preview()` speaks a short sample **in the voice's own language** — 26 localised strings,
+  falling back to English. An English sample also names the voice.
+- Renderer: cascading **Language → Type → Voice** selectors in both the TTS bar and
+  Settings, kept in step through one shared `paintVoicePickers()`; a 🔈 Demo button in each;
+  a hint telling the user how to install more languages.
+- Legacy settings holding a bare voice name still resolve (`resolveVoice` falls back).
+
+Test outcomes — 8/8 suites green:
+- `test-tts.js` (new) 27/27 — discovery and merge, composite ids, locale/gender/language
+  metadata, no duplicate people, **OneCore reachability**, locale naming, per-language demo
+  text (asserts a Hindi voice gets Devanagari, not English), real RIFF/WAVE output per
+  engine, and rate actually changing rendered audio length (255,386 vs 106,286 bytes).
+- `test-ui.js` extended to 33 — language selector populated with readable names, Any+gender
+  types, demo button present, changing language re-filters voices, gender filter narrows.
+- All six earlier suites still green.
+
+Note: a first run of the extended UI test hung silently. Cause was `await` in a non-async
+arrow callback — a SyntaxError masked by suppressed stderr. `node --check` now used first.
+
 ## 2026-07-31 — v2.1.0: tabbed workspace, attachments, auto model pick, TTS, OCR
 
 Executed:

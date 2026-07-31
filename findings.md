@@ -1,5 +1,38 @@
 # Findings
 
+## Windows hides half its TTS voices from you (v2.1.1)
+
+- Windows keeps voices in **two separate registries with two separate APIs**, and the one
+  most code reaches for sees fewer of them:
+  - `HKLM\SOFTWARE\Microsoft\Speech\Voices\Tokens` — SAPI5, what `System.Speech` enumerates.
+  - `HKLM\SOFTWARE\Microsoft\Speech_OneCore\Voices\Tokens` — the modern set used by Narrator,
+    reachable only through WinRT `Windows.Media.SpeechSynthesis`.
+- On this machine that gap was **2 voices vs 5**. SAPI showed David and Zira (en-US) only;
+  OneCore additionally had **Heera and Ravi (en-IN)** and Mark. The v2.1.0 build used
+  `System.Speech`, so those Indian-English voices were installed and simply unreachable.
+- The widely-posted "fix" is copying OneCore tokens into the SAPI registry key. That is an
+  **admin-level modification of a system registry hive** — not something the app should do.
+  Reading both engines achieves the same result with zero system changes.
+- WinRT specifics worth remembering:
+  - `SpeechSynthesizer.AllVoices` is static and enumerates without instantiating a voice.
+  - It has **no `Rate` property** — speed must come from an SSML `<prosody rate='±N%'>`
+    wrapper via `SynthesizeSsmlToStreamAsync`. Verified by measuring rendered WAV size:
+    rate −6 → 255,386 bytes vs rate +8 → 106,286 bytes for identical text.
+  - Output is a real `RIFF/WAVE` stream, so the same path serves both playback
+    (`SoundPlayer.PlaySync`) and Save-to-WAV.
+  - The async API needs the `AsTask` reflection dance in PowerShell 5.1; there is no
+    `await` keyword.
+- Voices are merged and de-duplicated on `(person, locale)` after stripping the `Microsoft `
+  prefix and ` Desktop` suffix — otherwise "Microsoft David Desktop" (SAPI) and
+  "Microsoft David" (OneCore) appear as two different people.
+
+## Test-authoring trap
+
+- `await` inside a **non-async arrow callback** (`langs.find(l => l !== await js(...))`) is a
+  SyntaxError that aborts the whole script before a single line runs. With stderr suppressed
+  it presents as a silent hang, not an error. `node --check <file>` catches it instantly and
+  is worth running on any test script that appears to stall.
+
 ## PDF text extraction (v2.1)
 
 - **"Looks like text" is not "is the right text."** The first decode-quality gate scored

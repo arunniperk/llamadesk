@@ -72,7 +72,12 @@ contributing nothing.
 (coding, reasoning, long-context, vision, tool use), VRAM fit and context length, then marks
 the winner with ★ in the sidebar. Toggle it off in Settings → OCR & Voice.
 
-**Text to speech** uses the built-in Windows SAPI voices — no model download, no network.
+**Text to speech** picks voices by **language → type (gender) → voice**, with a **🔈 Demo**
+button that speaks a short sample *in that voice's own language*. Voices are read from
+**both** Windows engines — classic SAPI5 and the modern OneCore set — because they live in
+separate registries and OneCore usually has more languages installed. On a stock Windows 11
+box SAPI alone shows 2 en-US voices while the merged list also exposes English (India).
+No model download, no network.
 
 ## Getting started
 

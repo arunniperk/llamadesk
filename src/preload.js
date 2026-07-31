@@ -71,6 +71,7 @@ contextBridge.exposeInMainWorld('api', {
   tts: {
     voices: invoke('tts:voices'),
     speak: invoke('tts:speak'),
+    preview: invoke('tts:preview'),
     stop: invoke('tts:stop'),
     save: invoke('tts:save'),
   },
