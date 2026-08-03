@@ -59,6 +59,24 @@ app.whenReady().then(() => {
   check('abliterated flagged uncensored', general.caps.uncensored === 10);
   check('embedding model isolated', embed.caps.embedding === 10 && embed.caps.coding === 0);
 
+  // Regression (v2.1.2): vision was decided two ways that could disagree — an
+  // mmproj-*.gguf beside the model (proof, used by labelsFor) versus a filename regex
+  // (guess, used by the OCR gate in pickFor). A projector-shipping model whose name has no
+  // vision word was badged "Vision" in the sidebar yet refused by the OCR task.
+  const projOnly = fake('Huihui-Qwythos-9B-Claude-Mythos-5-1M-abliterated-Q6_K.gguf', 1000000, 7.6);
+  projOnly.mmproj = 'D:\\x\\mmproj-model-bf16.gguf';
+  projOnly.vision = true;
+  projOnly.caps = models.capabilities(projOnly);       // recompute now that vision is known
+  check('mmproj beside a model proves vision even without a vision word in the name',
+    projOnly.caps.vision > 0, String(projOnly.caps.vision));
+  check('  ...so the OCR task will actually use it',
+    !!models.pickFor([projOnly], tasks.get('ocr')).top);
+  check('  ...and its label agrees with the picker',
+    models.labelsFor(projOnly, {}).includes('Vision'));
+  const noProj = fake('Some-Plain-Text-Model-7B-Q4_K_M.gguf', 32768, 4.2);
+  check('a model with no projector and no vision word stays non-vision',
+    noProj.caps.vision === 0 && !models.pickFor([noProj], tasks.get('ocr')).top);
+
   const pool = [coder, general, longdoc, vision, embed];
   check('coding task picks the coder',
     models.pickFor(pool, tasks.get('code')).top.model.file === coder.file,

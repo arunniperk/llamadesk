@@ -1,5 +1,32 @@
 # Progress log
 
+## 2026-08-01 — review of v2.1.2 + vision-detection fix
+
+Reviewed the incoming v2.1.2 (context sizing, model labels, alternation fix). The KV-cache
+work, the per-layer `head_count_kv` NaN fix, the SWA exclusion and `normalizeConvo()` all
+read correctly and are well covered by the two new suites.
+
+Found and fixed one regression it introduced: **vision was decided two different ways that
+could disagree** — see findings.md. `labelsFor()` read the mmproj proof while `pickFor()`'s
+OCR gate read the filename guess, so a projector-shipping model with no vision word in its
+name was badged "Vision" yet refused by the OCR task. Demonstrated against
+`Huihui-Qwythos-9B` (ships `mmproj-model-bf16.gguf`), which is a model queued for download.
+
+Executed:
+- `models.js` — `capabilities()` now trusts `m.vision` (mmproj present) and falls back to the
+  filename regex, so the badge and the picker cannot disagree.
+- `test-tasks.js` — 4 new regression checks: proof beats a nameless filename, the OCR task
+  then accepts the model, the label agrees with the picker, and a model with neither a
+  projector nor a vision word stays non-vision.
+
+Test outcomes — **10/10 suites green** on this machine, including `test-tts`.
+
+On the `test-tts` failure recorded in the v2.1.2 commit ("more than one locale is offered"):
+it does **not** reproduce here — this machine enumerates the OneCore en-IN voices (Heera,
+Ravi) and the suite passes 27/27. The difference is the machine, not the code: that check
+asserts more than one locale is *installed*, which is an environment fact. Worth relaxing to
+a warning if the other machine is meant to stay green.
+
 ## 2026-07-31 — v2.1.2: context sizing, model labels, alternation fix
 
 Work developed in parallel on another machine, reconciled onto v2.1.1. Its attachment/PDF

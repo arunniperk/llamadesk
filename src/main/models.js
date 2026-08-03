@@ -189,7 +189,11 @@ function capabilities(m) {
   if (/(embed|bge-|e5-|gte-)/.test(n)) { caps.embedding = 10; return caps; }
 
   const isCoder = /(coder|codestral|starcoder|codellama|codegeex|deepseek-?coder|devstral|code)/.test(n);
-  const isVision = /(-vl|vision|llava|minicpm-v|pixtral|ocr|qwen.?vl)/.test(n);
+  // An mmproj-*.gguf beside the model is PROOF of vision capability; the filename is only a
+  // guess. Trust the proof first — otherwise a projector-shipping model whose name lacks a
+  // vision word (e.g. Huihui-Qwythos-9B) is badged "Vision" in the sidebar while the OCR
+  // task refuses it, because labelsFor() reads m.vision but the OCR gate reads caps.vision.
+  const isVision = m.vision === true || /(-vl|vision|llava|minicpm-v|pixtral|ocr|qwen.?vl)/.test(n);
   const isReasoner = /(reason|thinking|-r1|deepseek-r1|qwq|thinkingcap|o1|marco-o1)/.test(n);
   const isUncensored = /(abliterat|uncensored|dolphin|heretic|unrestricted)/.test(n);
   const knownToolFamily = /(qwen|llama-?3|mistral|ministral|hermes|functionary|command-r|glm|deepseek|granite|phi-[34]|gemma-?[34]|gpt-oss|nemotron|smollm|ornith|mythos)/.test(n);

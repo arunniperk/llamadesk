@@ -1,5 +1,24 @@
 # Findings
 
+## Two sources of truth for one property will drift (v2.1.2 review)
+
+- v2.1.2 correctly upgraded vision detection from a filename guess to **proof**: an
+  `mmproj-*.gguf` sitting beside the model, the same pairing `ocr.js` performs. But it wrote
+  that proof to a *new* field (`m.vision`) and left the old filename regex driving
+  `caps.vision`. Two consumers then read different fields:
+  - `labelsFor()` → `m.vision` → badges the card **"Vision"**
+  - `pickFor()`'s OCR gate → `caps.vision` → **refuses the model**
+- Demonstrated with `Huihui-Qwythos-9B-Claude-Mythos-5-1M-abliterated` (ships
+  `mmproj-model-bf16.gguf`, no vision word in the filename): `m.vision=true`,
+  `caps.vision=0`, label `["Vision", …]`, OCR pick **refused**.
+- Fixed by making the proof feed the guess — `capabilities()` now starts from
+  `m.vision === true` and falls back to the regex. `scan()` already sets `m.vision` before
+  calling `capabilities()`, so no reordering was needed.
+- The general lesson: when you upgrade a heuristic to a measurement, **replace** the
+  heuristic's output rather than adding a parallel field. A UI badge that disagrees with the
+  behaviour it advertises is worse than the original guess, because the user now has a reason
+  to trust it.
+
 ## Context length is a memory budget, not a setting (v2.1.2)
 
 - KV cache grows **linearly with n_ctx**, so the ceiling is
